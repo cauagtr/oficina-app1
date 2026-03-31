@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8">  
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Oficina — Gestão</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -259,10 +259,11 @@ tbody tr{cursor:pointer}
   <div class="auth-box">
     <div class="auth-logo">🔧 <span>Oficina</span></div>
     <div class="auth-sub">Painel de Gestão</div>
-    
-    <button class="btn-login" style="margin-top: 20px;" onclick="doLogin()">
-      Entrar no Sistema
-    </button>
+    <label>E-mail</label>
+    <input type="email" id="auth-email" placeholder="gestor@oficina.com" autocomplete="email">
+    <label>Senha</label>
+    <input type="password" id="auth-pass" placeholder="••••••••" autocomplete="current-password">
+    <button class="btn-login" onclick="doLogin()">Entrar</button>
   </div>
 </div>
 
@@ -338,8 +339,8 @@ tbody tr{cursor:pointer}
 // ══════════════════════════════════════════════════════════
 // CONFIGURAÇÃO — substitua com suas credenciais do Supabase
 // ══════════════════════════════════════════════════════════
-const SUPABASE_URL = 'https://lmugbjphfhjaajsdzkbj.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxtdWdianBoZmhqYWFqc2R6a2JqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyNzg0NzAsImV4cCI6MjA4OTg1NDQ3MH0.Rqm2Oy5V4lhlrckrvqGq7xtIOLm6VFjuuWjclxbQ_Ts';
+const SUPABASE_URL = 'https://phmtiulbrlnwjllcrjcf.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBobXRpdWxicmxud2psbGNyamNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NjgwODksImV4cCI6MjA5MDU0NDA4OX0.vsM7EZckDErY4rGLM-BTfmthW4ern9sT1TnIN6FT4ss';
 
 let _sb = null;
 function getSB() {
@@ -385,30 +386,33 @@ function openModal(titulo, sub='', body='', footer='', lg=false) {
 function closeModal() { document.getElementById('modal-overlay').classList.add('hidden'); }
 function closeModalOutside(e) { if(e.target.id==='modal-overlay') closeModal(); }
 
-// ── AUTH SIMPLIFICADA ───────────────────────────────────────
-function doLogin() {
-  const auth = document.getElementById('auth-screen');
-  const app = document.getElementById('app');
-  
-  // Esconde o login e mostra o app manualmente
-  auth.classList.add('hidden');
-  app.classList.remove('hidden');
-  
-  // Define um nome fixo na sidebar já que não temos e-mail de sessão
-  document.getElementById('sidebar-user').textContent = "Gestor Oficina";
-  
-  // Inicializa o aplicativo
-  App.init();
+// ── AUTH ───────────────────────────────────────────────────
+async function doLogin(){
+  const email = document.getElementById('auth-email').value.trim();
+  const pass  = document.getElementById('auth-pass').value;
+  if(!email||!pass){ toast('Preencha e-mail e senha','error'); return; }
+  const {error} = await getSB().auth.signInWithPassword({email, password:pass});
+  if(error){ toast('E-mail ou senha incorretos','error'); return; }
 }
-
-async function doLogout() {
-  // Apenas reverte as classes para voltar à tela inicial
+async function doLogout(){
+  await getSB().auth.signOut();
   document.getElementById('auth-screen').classList.remove('hidden');
   document.getElementById('app').classList.add('hidden');
 }
+getSB().auth.onAuthStateChange((event, session) => {
+  const auth = document.getElementById('auth-screen');
+  const app  = document.getElementById('app');
+  if(session){
+    auth.classList.add('hidden');
+    app.classList.remove('hidden');
+    document.getElementById('sidebar-user').textContent = session.user.email;
+    App.init();
+  } else {
+    auth.classList.remove('hidden');
+    app.classList.add('hidden');
+  }
+});
 
-// Mantenha o listener apenas se você ainda for usar outras funções do Supabase (DB), 
-// mas para o login visual, a função acima já resolve.
 // ── OFFLINE ────────────────────────────────────────────────
 window.addEventListener('online',  () => document.getElementById('offline-banner').style.display='none');
 window.addEventListener('offline', () => document.getElementById('offline-banner').style.display='block');
