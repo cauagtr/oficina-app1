@@ -1773,7 +1773,7 @@ let _estSearch='', _estBTimer;
 
 async function renderEstoque(el) {
   document.getElementById('topbar-actions').innerHTML = `
-    <button class="btn btn-secondary" onclick="abrirEntradaEstoque()">Entrada</button>
+    <button class="btn btn-primary" style="background:var(--orange,#f97316);border-color:var(--orange,#f97316)" onclick="abrirEntradaEstoque()">+ Registrar Entrada</button>
     <button class="btn btn-primary" onclick="abrirFormEstoque()">+ Novo Produto</button>`;
 
   const {data:lista} = await getSB().from('estoque').select('*,fornecedores(nome_fantasia,razao_social)').order('nome');
@@ -1925,7 +1925,13 @@ async function abrirEntradaEstoque() {
       <div class="form-group"><label class="req">Valor Unit. Custo (R$)</label><input type="number" id="ee-custo" value="0" step="0.01"></div>
     </div>
     <div class="form-group"><label class="req">Data</label><input type="date" id="ee-data" value="${isoHoje()}"></div>
-    <div class="form-group"><label>Observações</label><input type="text" id="ee-obs" placeholder="Nota fiscal, fornecedor..."></div>
+    <div class="form-group">
+      <label>Nota Fiscal (foto ou PDF)</label>
+      <input type="file" id="ee-nf" accept="image/*,application/pdf"
+        style="padding:.5rem;border:1.5px dashed var(--border);border-radius:.5rem;width:100%;cursor:pointer;background:var(--bg)">
+      <div style="font-size:.72rem;color:var(--muted);margin-top:.3rem">JPG, PNG ou PDF · max 5MB</div>
+    </div>
+    <div class="form-group"><label>Observações</label><input type="text" id="ee-obs" placeholder="Fornecedor, número da NF..."></div>
   `,`<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
      <button class="btn btn-primary" onclick="registrarEntradaEstoque()">Registrar Entrada</button>`);
 }
@@ -1944,17 +1950,40 @@ async function registrarEntradaEstoque() {
   const custo  = parseFloat(document.getElementById('ee-custo').value)||0;
   const data   = document.getElementById('ee-data').value;
   const obs    = document.getElementById('ee-obs').value;
+  const nfInput= document.getElementById('ee-nf');
   if (!prodId)  { toast('Selecione o produto','error'); return; }
   if (qtd<=0)   { toast('Quantidade inválida','error'); return; }
   if (!custo)   { toast('Valor de custo é obrigatório','error'); return; }
   if (!data)    { toast('Data é obrigatória','error'); return; }
 
+  // Converter NF para base64 se houver arquivo
+  let nfBase64 = null, nfNome = null, nfTipo = null;
+  if (nfInput && nfInput.files && nfInput.files[0]) {
+    const file = nfInput.files[0];
+    if (file.size > 5*1024*1024) { toast('Arquivo maior que 5MB','error'); return; }
+    nfBase64 = await new Promise(res => {
+      const r = new FileReader();
+      r.onload = e => res(e.target.result.split(',')[1]);
+      r.readAsDataURL(file);
+    });
+    nfNome = file.name;
+    nfTipo = file.type;
+  }
+
   const sb = getSB();
-  const {data:prod}=await sb.from('estoque').select('quantidade').eq('id',prodId).single();
+  const {data:prod}=await sb.from('estoque').select('quantidade,nome').eq('id',prodId).single();
   const nova = (Number(prod?.quantidade)||0)+qtd;
   await Promise.all([
     sb.from('estoque').update({quantidade:nova,valor_custo:custo}).eq('id',prodId),
-    sb.from('estoque_movimentos').insert({produto_id:prodId,tipo:'entrada',quantidade:qtd,valor_unitario:custo,observacoes:obs})
+    sb.from('estoque_movimentos').insert({
+      produto_id:prodId, tipo:'entrada', quantidade:qtd,
+      valor_unitario:custo, observacoes:obs,
+      data_movimento:data,
+      nf_base64:nfBase64||null,
+      nf_nome:nfNome||null,
+      nf_tipo:nfTipo||null,
+      produto_nome:prod?.nome||null
+    })
   ]);
   toast(`Entrada registrada! Novo total: ${nova}`);
   closeModal(); App.navigate('estoque');
@@ -2235,10 +2264,127 @@ async function registrarPonto(funcId) {
 // ══════════════════════════════════════════════════════════
 let _finTab='entradas';
 
+
+// ══════════════════════════════════════════════════════════
+// NOTAS FISCAIS DE FORNECEDORES
+// ══════════════════════════════════════════════════════════
+async function renderNotasFiscais(el) {
+  document.getElementById('topbar-actions').innerHTML =
+    `<button class="btn btn-primary" style="background:var(--orange,#f97316)" onclick="exportarNotasZip()">Exportar tudo (.zip)</button>`;
+
+  const {data:movs} = await getSB()
+    .from('estoque_movimentos')
+    .select('id,produto_nome,quantidade,valor_unitario,data_movimento,observacoes,nf_base64,nf_nome,nf_tipo,created_at')
+    .eq('tipo','entrada')
+    .not('nf_base64','is',null)
+    .order('created_at',{ascending:false});
+
+  const lista = movs||[];
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-body" style="padding:.85rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-weight:700;font-size:.9rem">${lista.length} nota(s) fiscal(is) registrada(s)</div>
+          <div style="font-size:.75rem;color:var(--muted)">Clique em uma nota para visualizar ou baixar</div>
+        </div>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Data</th><th>Produto</th><th>Qtd</th><th>Custo Unit.</th><th>Arquivo</th><th>Obs.</th><th></th></tr></thead>
+            <tbody>
+              ${lista.length===0
+                ? `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:2rem">Nenhuma nota fiscal registrada ainda</td></tr>`
+                : lista.map(m=>{
+                    const dataFmt = m.data_movimento ? brData(m.data_movimento) : brData(m.created_at);
+                    const isImg   = (m.nf_tipo||'').startsWith('image/');
+                    const icon    = isImg ? '🖼️' : '📄';
+                    return `<tr>
+                      <td>${dataFmt}</td>
+                      <td><strong>${m.produto_nome||'—'}</strong></td>
+                      <td>${m.quantidade}</td>
+                      <td>${brl(m.valor_unitario)}</td>
+                      <td>
+                        <span style="font-size:.8rem">${icon} ${m.nf_nome||'nota'}</span>
+                      </td>
+                      <td style="font-size:.8rem;color:var(--muted)">${m.observacoes||'—'}</td>
+                      <td>
+                        <button class="btn btn-secondary btn-sm" onclick="verNota('${m.id}')">Ver</button>
+                        <button class="btn btn-primary btn-sm" onclick="baixarNota('${m.id}')">Baixar</button>
+                      </td>
+                    </tr>`;
+                  }).join('')
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Cache para visualização
+  window._notasCache = lista;
+}
+
+async function verNota(id) {
+  const m = (window._notasCache||[]).find(x=>x.id===id);
+  if (!m||!m.nf_base64) { toast('Nota não encontrada','error'); return; }
+  const dataUrl = `data:${m.nf_tipo||'application/octet-stream'};base64,${m.nf_base64}`;
+  const isImg   = (m.nf_tipo||'').startsWith('image/');
+  const isPdf   = (m.nf_tipo||'').includes('pdf');
+  if (isImg) {
+    openModal('Nota Fiscal — '+(m.nf_nome||''), '',
+      `<img src="${dataUrl}" style="width:100%;border-radius:.5rem">`,
+      `<button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
+       <button class="btn btn-primary" onclick="baixarNota('${id}')">Baixar</button>`);
+  } else if (isPdf) {
+    window.open(dataUrl, '_blank');
+  } else {
+    baixarNota(id);
+  }
+}
+
+function baixarNota(id) {
+  const m = (window._notasCache||[]).find(x=>x.id===id);
+  if (!m||!m.nf_base64) { toast('Nota não encontrada','error'); return; }
+  const dataUrl = `data:${m.nf_tipo||'application/octet-stream'};base64,${m.nf_base64}`;
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = m.nf_nome||('nota_'+id);
+  a.click();
+}
+
+async function exportarNotasZip() {
+  const {data:movs} = await getSB()
+    .from('estoque_movimentos')
+    .select('id,produto_nome,data_movimento,nf_base64,nf_nome,nf_tipo,created_at')
+    .eq('tipo','entrada')
+    .not('nf_base64','is',null)
+    .order('created_at',{ascending:false});
+
+  if (!movs||movs.length===0) { toast('Nenhuma nota fiscal para exportar','error'); return; }
+  toast('Preparando download... aguarde');
+
+  // Criar zip simples: baixar cada arquivo individualmente com delay
+  // (sem biblioteca externa — baixar um por um em sequência)
+  for (let i=0; i<movs.length; i++) {
+    const m = movs[i];
+    if (!m.nf_base64) continue;
+    const dataUrl = `data:${m.nf_tipo||'application/octet-stream'};base64,${m.nf_base64}`;
+    const data    = m.data_movimento ? m.data_movimento.substring(0,10).replace(/-/g,'') : '';
+    const nome    = `${data}_${(m.produto_nome||'produto').replace(/\s+/g,'_')}_${i+1}_${m.nf_nome||'nota'}`;
+    const a = document.createElement('a');
+    a.href = dataUrl; a.download = nome; a.click();
+    await new Promise(r=>setTimeout(r,350));
+  }
+  toast(`${movs.length} nota(s) exportada(s)!`);
+}
+
 async function renderFinanceiro(el) {
   el.innerHTML = `
     <div class="tabs">
-      ${[['entradas','Entradas'],['saidas','Saídas'],['pagar','A Pagar'],['receber','A Receber'],['fluxo','Fluxo de Caixa'],['ofx','Conciliação'],['inadimplencia','Inadimplência']].map(([k,l])=>
+      ${[['entradas','Entradas'],['saidas','Saídas'],['pagar','A Pagar'],['receber','A Receber'],['fluxo','Fluxo de Caixa'],['ofx','Conciliação'],['inadimplencia','Inadimplência'],['notas','Notas Fiscais']].map(([k,l])=>
         `<button class="tab ${_finTab===k?'active':''}" onclick="switchFinTab('${k}')">${l}</button>`
       ).join('')}
     </div>
@@ -2250,7 +2396,7 @@ async function renderFinanceiro(el) {
 function switchFinTab(tab) {
   _finTab = tab;
   document.querySelectorAll('.tabs .tab').forEach((t,i)=>{
-    const tabKeys=['entradas','saidas','pagar','receber','fluxo','ofx','inadimplencia'];
+    const tabKeys=['entradas','saidas','pagar','receber','fluxo','ofx','inadimplencia','notas'];
     t.classList.toggle('active',tabKeys[i]===tab);
   });
   renderFinTab(tab);
@@ -2267,6 +2413,7 @@ async function renderFinTab(tab) {
   else if (tab==='fluxo')   await renderFluxoCaixa(el);
   else if (tab==='ofx')     renderOFX(el);
   else if (tab==='inadimplencia') await renderInadimplencia(el);
+  else if (tab==='notas')         await renderNotasFiscais(el);
 }
 
 async function renderFinEntradas(el) {
