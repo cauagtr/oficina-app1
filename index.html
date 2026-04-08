@@ -371,9 +371,16 @@ tbody tr { cursor: pointer; }
       <div class="nav-item" data-page="estoque"            onclick="App.navigate('estoque')"><span class="nav-icon">▣</span> Estoque</div>
       <div class="nav-item" data-page="fornecedores"       onclick="App.navigate('fornecedores')"><span class="nav-icon">▤</span> Fornecedores</div>
       <div class="nav-item" data-page="funcionarios"       onclick="App.navigate('funcionarios')"><span class="nav-icon">◙</span> Funcionários</div>
+      <div class="nav-section">Equipe</div>
+      <div class="nav-item" data-page="produtividade"   onclick="App.navigate('produtividade')"><span class="nav-icon">📊</span> Produtividade</div>
       <div class="nav-section">Financeiro</div>
       <div class="nav-item" data-page="financeiro"         onclick="App.navigate('financeiro')"><span class="nav-icon">◈</span> Financeiro</div>
       <div class="nav-item" data-page="relatorios"         onclick="App.navigate('relatorios')"><span class="nav-icon">◭</span> Relatórios</div>
+      <div class="nav-section">Operacional</div>
+      <div class="nav-item" data-page="pedido_compra"   onclick="App.navigate('pedido_compra')"><span class="nav-icon">🛒</span> Pedido de Compra</div>
+      <div class="nav-item" data-page="relat_contador"  onclick="App.navigate('relat_contador')"><span class="nav-icon">📁</span> Rel. Contador</div>
+      <div class="nav-item" data-page="reclamacoes"     onclick="App.navigate('reclamacoes')"><span class="nav-icon">⚠️</span> Reclamações</div>
+      <div class="nav-item" data-page="conformidade"    onclick="App.navigate('conformidade')"><span class="nav-icon">⚖️</span> Conformidade</div>
       <div class="nav-section">Sistema</div>
       <div class="nav-item" data-page="configuracoes"      onclick="App.navigate('configuracoes')"><span class="nav-icon">◎</span> Configurações</div>
     </nav>
@@ -578,6 +585,11 @@ const PAGES = {
   estoque:      { title:'Estoque',            sub:'Peças e produtos',           render: renderEstoque      },
   fornecedores: { title:'Fornecedores',       sub:'Gestão de fornecedores',     render: renderFornecedores },
   funcionarios: { title:'Funcionários',       sub:'Equipe e ponto',             render: renderFuncionarios },
+  produtividade:{ title:'Produtividade',       sub:'Desempenho da equipe',        render: renderProdutividade },
+  pedido_compra:{ title:'Pedido de Compra',    sub:'Reposição de estoque',        render: renderPedidoCompra  },
+  relat_contador:{title:'Rel. Contador',       sub:'Exportar para contador',      render: renderRelatorioContador},
+  reclamacoes:  { title:'Reclamações',         sub:'Gestão de garantias',         render: renderReclamacoes   },
+  conformidade: { title:'Conformidade',        sub:'Checklist jurídico',          render: renderChecklistJuridico},
   financeiro:   { title:'Financeiro',         sub:'Receitas, despesas e fluxo', render: renderFinanceiro   },
   relatorios:   { title:'Relatórios',         sub:'Análises exportáveis',       render: renderRelatorios   },
   configuracoes:{ title:'Configurações',      sub:'Dados da oficina',           render: renderConfiguracoes},
@@ -2544,10 +2556,566 @@ async function exportarNotasZip() {
   toast(`${movs.length} nota(s) exportada(s)!`);
 }
 
+
+// ══════════════════════════════════════════════════════════
+// FASE 2.1/2.2 — MARGEM POR OS
+// ══════════════════════════════════════════════════════════
+async function renderMargemOS(el) {
+  document.getElementById('topbar-actions').innerHTML =
+    `<button class="btn btn-secondary" onclick="exportarMargemCSV()">Exportar CSV</button>`;
+
+  const sb = getSB();
+  const [mesAtual, mesAnt] = [isoHoje().substring(0,7), (() => {
+    const d = new Date(); d.setMonth(d.getMonth()-1); return d.toISOString().substring(0,7);
+  })()];
+
+  // Filtro de período
+  const periodo = window._margemPeriodo || mesAtual;
+
+  const {data:osList} = await sb
+    .from('ordens_servico')
+    .select('id,numero,status,valor_total,valor_servicos,valor_pecas,desconto,data_entrada,clientes(nome),veiculos(placa,modelo)')
+    .eq('status','pago')
+    .gte('data_entrada', periodo+'-01')
+    .lte('data_entrada', periodo+'-31')
+    .order('data_entrada',{ascending:false});
+
+  // Para cada OS, buscar custo real das peças (valor_custo × quantidade)
+  const osIds = (osList||[]).map(o=>o.id);
+  let custoMap = {};
+  if (osIds.length > 0) {
+    const {data:itens} = await sb
+      .from('os_itens')
+      .select('os_id,tipo,quantidade,valor_unitario,tipo_peca')
+      .in('os_id', osIds)
+      .eq('tipo','peca');
+
+    // Buscar custo real do estoque para calcular margem
+    (itens||[]).forEach(it => {
+      if (!custoMap[it.os_id]) custoMap[it.os_id] = 0;
+      // Usa valor_unitario como custo de peça (registrado no momento da venda)
+      custoMap[it.os_id] += Number(it.valor_unitario||0) * Number(it.quantidade||1);
+    });
+  }
+
+  const lista = (osList||[]).map(o => {
+    const receitaTotal = Number(o.valor_total||0);
+    const custoPecas   = custoMap[o.id] || Number(o.valor_pecas||0) * 0.6; // fallback 40% margem peça
+    const margemBruta  = receitaTotal - custoPecas;
+    const pctMargem    = receitaTotal > 0 ? (margemBruta/receitaTotal*100) : 0;
+    return { ...o, custoPecas, margemBruta, pctMargem };
+  });
+
+  const totRec  = lista.reduce((s,o)=>s+Number(o.valor_total),0);
+  const totCust = lista.reduce((s,o)=>s+o.custoPecas,0);
+  const totMarg = totRec - totCust;
+  const pctGeral= totRec>0 ? (totMarg/totRec*100) : 0;
+
+  window._margemCache = lista;
+
+  el.innerHTML = `
+    <div style="display:flex;gap:.65rem;margin-bottom:1rem;align-items:center;flex-wrap:wrap">
+      <label style="font-size:.78rem;font-weight:600;color:var(--muted)">Período:</label>
+      <input type="month" value="${periodo}"
+        style="padding:.38rem .65rem;border:1.5px solid var(--border);border-radius:.5rem;font-size:.85rem;font-family:inherit"
+        onchange="window._margemPeriodo=this.value;renderFinTab('margem')">
+    </div>
+    <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:1rem">
+      <div class="kpi-card green"><div class="kpi-label">Receita Total</div><div class="kpi-value">${brl(totRec)}</div></div>
+      <div class="kpi-card red"><div class="kpi-label">Custo de Peças</div><div class="kpi-value">${brl(totCust)}</div></div>
+      <div class="kpi-card ${totMarg>=0?'green':'red'}"><div class="kpi-label">Margem Bruta</div><div class="kpi-value">${brl(totMarg)}</div></div>
+      <div class="kpi-card ${pctGeral>=30?'green':pctGeral>=15?'yellow':'red'}"><div class="kpi-label">% Margem</div><div class="kpi-value">${pctGeral.toFixed(1)}%</div></div>
+    </div>
+    <div class="card"><div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>OS</th><th>Cliente</th><th>Veículo</th><th>Receita</th><th>Custo Peças</th><th>Margem</th><th>%</th><th>Data</th></tr></thead>
+      <tbody>
+        ${lista.length===0
+          ? `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:2rem">Nenhuma OS paga no período</td></tr>`
+          : lista.map(o => {
+              const cor = o.pctMargem>=30?'var(--green)':o.pctMargem>=15?'var(--amber)':'var(--red)';
+              return `<tr>
+                <td><strong>${o.numero}</strong></td>
+                <td>${o.clientes?.nome||'—'}</td>
+                <td>${o.veiculos?.placa||''} ${o.veiculos?.modelo||''}</td>
+                <td style="color:var(--green);font-weight:700">${brl(o.valor_total)}</td>
+                <td style="color:var(--red)">${brl(o.custoPecas)}</td>
+                <td style="font-weight:700">${brl(o.margemBruta)}</td>
+                <td><span style="color:${cor};font-weight:800">${o.pctMargem.toFixed(1)}%</span></td>
+                <td>${brData(o.data_entrada)}</td>
+              </tr>`;
+            }).join('')
+        }
+      </tbody>
+    </table></div></div></div>
+  `;
+}
+
+function exportarMargemCSV() {
+  const lista = window._margemCache||[];
+  if (!lista.length) { toast('Nenhum dado para exportar','error'); return; }
+  const header = 'OS,Cliente,Veiculo,Receita,Custo Pecas,Margem,% Margem,Data\n';
+  const rows = lista.map(o =>
+    `${o.numero},"${o.clientes?.nome||''}",${ o.veiculos?.placa||''},${o.valor_total},${o.custoPecas.toFixed(2)},${o.margemBruta.toFixed(2)},${o.pctMargem.toFixed(1)}%,${brData(o.data_entrada)}`
+  ).join('\n');
+  const blob = new Blob(['﻿'+header+rows], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='margem_os_'+(window._margemPeriodo||isoHoje().substring(0,7))+'.csv'; a.click();
+}
+
+// ══════════════════════════════════════════════════════════
+// FASE 2.3 — COMISSÃO DE MECÂNICO
+// Calculada automaticamente ao fechar OS com base em valor_servicos × percentual
+// Visível no painel de produtividade
+// ══════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════
+// FASE 2.4 — PRODUTIVIDADE POR MECÂNICO
+// ══════════════════════════════════════════════════════════
+async function renderProdutividade(el) {
+  const sb = getSB();
+  const periodo = window._prodPeriodo || isoHoje().substring(0,7);
+
+  const [{data:funcs},{data:osList}] = await Promise.all([
+    sb.from('funcionarios').select('id,nome,cargo,valor_hora,percentual_comissao').eq('status','ativo'),
+    sb.from('ordens_servico')
+      .select('id,numero,status,valor_total,valor_servicos,mecanico_id,data_entrada,data_pagamento')
+      .gte('data_entrada', periodo+'-01')
+      .lte('data_entrada', periodo+'-31')
+  ]);
+
+  const os = osList||[];
+  const prodMap = {};
+  (funcs||[]).forEach(f => {
+    const minhas = os.filter(o=>o.mecanico_id===f.id);
+    const fechadas = minhas.filter(o=>o.status==='pago');
+    const totalSvcs = fechadas.reduce((s,o)=>s+Number(o.valor_servicos||0),0);
+    const comissao  = totalSvcs * (Number(f.percentual_comissao||0)/100);
+    prodMap[f.id] = {
+      func:f, total:minhas.length, fechadas:fechadas.length,
+      abertas: minhas.filter(o=>!['pago','cancelado'].includes(o.status)).length,
+      ticketMedio: fechadas.length ? (fechadas.reduce((s,o)=>s+Number(o.valor_total),0)/fechadas.length) : 0,
+      totalSvcs, comissao
+    };
+  });
+
+  el.innerHTML = `
+    <div style="display:flex;gap:.65rem;margin-bottom:1rem;align-items:center;flex-wrap:wrap">
+      <label style="font-size:.78rem;font-weight:600;color:var(--muted)">Período:</label>
+      <input type="month" value="${periodo}"
+        style="padding:.38rem .65rem;border:1.5px solid var(--border);border-radius:.5rem;font-size:.85rem;font-family:inherit"
+        onchange="window._prodPeriodo=this.value;renderProdutividade(document.getElementById('fin-content'))">
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.85rem">
+      ${Object.values(prodMap).map(p => `
+        <div class="card" style="padding:1.1rem">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.75rem">
+            <div>
+              <div style="font-weight:800;font-size:.95rem">${p.func.nome}</div>
+              <div style="font-size:.75rem;color:var(--muted)">${p.func.cargo||'—'} · ${p.func.percentual_comissao||0}% comissão</div>
+            </div>
+            <span class="badge b-ativo">Ativo</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.75rem">
+            <div style="background:var(--bg);border-radius:.5rem;padding:.6rem;text-align:center">
+              <div style="font-size:1.4rem;font-weight:800">${p.total}</div>
+              <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase">OS abertas</div>
+            </div>
+            <div style="background:var(--bg);border-radius:.5rem;padding:.6rem;text-align:center">
+              <div style="font-size:1.4rem;font-weight:800;color:var(--green)">${p.fechadas}</div>
+              <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase">OS pagas</div>
+            </div>
+            <div style="background:var(--bg);border-radius:.5rem;padding:.6rem;text-align:center">
+              <div style="font-size:1.1rem;font-weight:800">${brl(p.ticketMedio)}</div>
+              <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase">Ticket médio</div>
+            </div>
+            <div style="background:#d1fae5;border-radius:.5rem;padding:.6rem;text-align:center">
+              <div style="font-size:1.1rem;font-weight:800;color:#065f46">${brl(p.comissao)}</div>
+              <div style="font-size:.68rem;color:#065f46;text-transform:uppercase">Comissão</div>
+            </div>
+          </div>
+          <div style="font-size:.78rem;color:var(--muted)">Serviços executados: <strong>${brl(p.totalSvcs)}</strong></div>
+          ${p.func.pix?`<div class="alert alert-info" style="margin-top:.5rem;padding:.4rem .7rem;font-size:.75rem">Pix: <strong>${p.func.pix}</strong></div>`:''}
+        </div>`).join('')}
+      ${Object.keys(prodMap).length===0?`<p style="color:var(--muted)">Nenhum funcionário ativo encontrado.</p>`:''}
+    </div>
+  `;
+}
+
+// ══════════════════════════════════════════════════════════
+// FASE 2.5 — PEDIDO DE COMPRA AUTOMÁTICO
+// ══════════════════════════════════════════════════════════
+async function renderPedidoCompra(el) {
+  document.getElementById('topbar-actions').innerHTML = '';
+  const {data:criticos} = await getSB()
+    .from('estoque')
+    .select('*,fornecedores(nome_fantasia,razao_social,telefone)')
+    .lte('quantidade','quantidade_minima')
+    .order('nome');
+
+  // Também buscar itens próximos do mínimo (até 20% acima)
+  const {data:todos} = await getSB().from('estoque').select('*,fornecedores(nome_fantasia,razao_social,telefone)').order('nome');
+  const proximos = (todos||[]).filter(p =>
+    Number(p.quantidade) > Number(p.quantidade_minima) &&
+    Number(p.quantidade) <= Number(p.quantidade_minima) * 1.2
+  );
+
+  window._pedidoSel = {};
+
+  el.innerHTML = `
+    ${(criticos||[]).length===0 && proximos.length===0
+      ? `<div class="alert alert-info">Nenhum produto abaixo ou próximo do estoque mínimo. Tudo OK!</div>`
+      : `
+      ${(criticos||[]).length>0 ? `
+        <div class="alert alert-danger" style="margin-bottom:.75rem">
+          ⚠️ ${(criticos||[]).length} produto(s) abaixo do mínimo — reposição urgente
+        </div>
+        <div class="card" style="margin-bottom:1rem">
+          <div class="card-header"><div class="card-title">Reposição Urgente</div></div>
+          <div class="card-body" style="padding:0">
+            <div class="table-wrap"><table>
+              <thead><tr><th><input type="checkbox" onchange="toggleTodosPedido(this)"></th><th>Produto</th><th>Atual</th><th>Mínimo</th><th>Sugerido</th><th>Fornecedor</th><th>WA</th></tr></thead>
+              <tbody>
+                ${(criticos||[]).map(p => {
+                  const sug = (Number(p.quantidade_minima)*3 - Number(p.quantidade));
+                  const tel = p.fornecedores?.telefone?.replace(/\D/g,'');
+                  const waTxt = `Olá! Preciso repor o produto *${p.nome}*. Quantidade: ${sug} ${p.unidade||'un'}. Por favor, informe prazo e valor.`;
+                  return `<tr>
+                    <td><input type="checkbox" id="ped-${p.id}" onchange="togglePedido('${p.id}','${p.nome.replace(/'/g,"\'")}',${sug})"></td>
+                    <td><strong>${p.nome}</strong><br><span style="font-size:.73rem;color:var(--muted)">${p.codigo||''}</span></td>
+                    <td style="color:var(--red);font-weight:700">${p.quantidade} ${p.unidade||'un'}</td>
+                    <td>${p.quantidade_minima} ${p.unidade||'un'}</td>
+                    <td><input type="number" id="sug-${p.id}" value="${sug}" min="1"
+                      style="width:65px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:.4rem;font-size:.85rem"></td>
+                    <td>${p.fornecedores?.nome_fantasia||p.fornecedores?.razao_social||'—'}</td>
+                    <td>${tel?`<a class="btn btn-whatsapp btn-sm" href="https://wa.me/55${tel}?text=${encodeURIComponent(waTxt)}" target="_blank">WA</a>`:'—'}</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:.5rem;margin-bottom:1.5rem">
+          <button class="btn btn-primary" onclick="gerarPedidoWA()">Gerar Pedido Selecionados via WA</button>
+        </div>
+      ` : ''}
+      ${proximos.length>0 ? `
+        <div class="alert alert-warning" style="margin-bottom:.75rem">
+          ℹ️ ${proximos.length} produto(s) próximos do mínimo — atenção
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title">Atenção — Estoque Baixo</div></div>
+          <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+            <thead><tr><th>Produto</th><th>Atual</th><th>Mínimo</th><th>Fornecedor</th></tr></thead>
+            <tbody>${proximos.map(p=>`<tr>
+              <td>${p.nome}</td>
+              <td style="color:var(--amber);font-weight:700">${p.quantidade} ${p.unidade||'un'}</td>
+              <td>${p.quantidade_minima} ${p.unidade||'un'}</td>
+              <td>${p.fornecedores?.nome_fantasia||p.fornecedores?.razao_social||'—'}</td>
+            </tr>`).join('')}
+            </tbody>
+          </table></div></div>
+        </div>
+      ` : ''}
+    `}
+  `;
+}
+
+function togglePedido(id, nome, qtd) {
+  const cb = document.getElementById('ped-'+id);
+  if (cb?.checked) window._pedidoSel[id] = {nome, qtd};
+  else delete window._pedidoSel[id];
+}
+function toggleTodosPedido(masterCb) {
+  document.querySelectorAll('[id^="ped-"]').forEach(cb => {
+    cb.checked = masterCb.checked;
+    const id = cb.id.replace('ped-','');
+    const sug = document.getElementById('sug-'+id);
+    if (masterCb.checked) window._pedidoSel[id] = {nome:cb.closest('tr').querySelector('td:nth-child(2) strong').textContent, qtd:parseInt(sug?.value||1)};
+    else delete window._pedidoSel[id];
+  });
+}
+function gerarPedidoWA() {
+  const itens = Object.values(window._pedidoSel||{});
+  if (!itens.length) { toast('Selecione ao menos um produto','error'); return; }
+  const lista = itens.map((i,n)=>`${n+1}. *${i.nome}* — ${i.qtd} un`).join('\n');
+  const msg = `Olá! Segue pedido de reposição de estoque:
+
+${lista}
+
+Por favor, confirme disponibilidade e prazo de entrega. Obrigado!`;
+  // Copiar para área de transferência
+  navigator.clipboard?.writeText(msg).then(()=>toast('Mensagem copiada! Cole no WhatsApp do fornecedor'));
+}
+
+// ══════════════════════════════════════════════════════════
+// FASE 2.6 — RELATÓRIO PARA CONTADOR
+// ══════════════════════════════════════════════════════════
+async function renderRelatorioContador(el) {
+  document.getElementById('topbar-actions').innerHTML = '';
+  const periodo = window._contPeriodo || isoHoje().substring(0,7);
+
+  el.innerHTML = `
+    <div style="display:flex;gap:.65rem;margin-bottom:1.25rem;align-items:center;flex-wrap:wrap">
+      <label style="font-size:.78rem;font-weight:600;color:var(--muted)">Competência:</label>
+      <input type="month" value="${periodo}"
+        style="padding:.38rem .65rem;border:1.5px solid var(--border);border-radius:.5rem;font-size:.85rem;font-family:inherit"
+        onchange="window._contPeriodo=this.value;renderRelatorioContador(document.getElementById('fin-content'))">
+    </div>
+    <div class="card" style="margin-bottom:1rem;padding:1.25rem">
+      <div class="form-section" style="margin-top:0">Exportar para o Contador</div>
+      <p style="font-size:.85rem;color:var(--muted);margin-bottom:1rem">
+        Gera um pacote completo com receitas, despesas e notas fiscais do período para entrega ao contador.
+      </p>
+      <div style="display:flex;gap:.65rem;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="exportarReceitasCSV('${periodo}')">Receitas (.csv)</button>
+        <button class="btn btn-secondary" onclick="exportarDespesasCSV('${periodo}')">Despesas (.csv)</button>
+        <button class="btn btn-secondary" onclick="exportarNFsPeriodo('${periodo}')">Notas Fiscais do Mês</button>
+      </div>
+    </div>
+    <div id="cont-preview"><div class="loading-wrap"><div class="spinner"></div>Carregando resumo...</div></div>
+  `;
+
+  // Carregar resumo do período
+  const sb = getSB();
+  const ini = periodo+'-01', fim = periodo+'-31';
+  const [{data:entradas},{data:saidas},{data:nfs}] = await Promise.all([
+    sb.from('financeiro_entradas').select('descricao,valor,categoria,forma_pagamento,data_recebimento').eq('status','recebido').gte('data_recebimento',ini).lte('data_recebimento',fim),
+    sb.from('financeiro_saidas').select('descricao,valor,categoria,data_pagamento').eq('status','pago').gte('data_pagamento',ini).lte('data_pagamento',fim),
+    sb.from('estoque_movimentos').select('produto_nome,quantidade,valor_unitario,data_movimento,nf_nome').eq('tipo','entrada').not('nf_base64','is',null).gte('data_movimento',ini).lte('data_movimento',fim)
+  ]);
+
+  const totEnt = (entradas||[]).reduce((s,r)=>s+Number(r.valor),0);
+  const totSai = (saidas||[]).reduce((s,r)=>s+Number(r.valor),0);
+
+  document.getElementById('cont-preview').innerHTML = `
+    <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:1rem">
+      <div class="kpi-card green"><div class="kpi-label">Receitas</div><div class="kpi-value">${brl(totEnt)}</div><div class="kpi-trend up">${(entradas||[]).length} lançamentos</div></div>
+      <div class="kpi-card red"><div class="kpi-label">Despesas</div><div class="kpi-value">${brl(totSai)}</div><div class="kpi-trend down">${(saidas||[]).length} lançamentos</div></div>
+      <div class="kpi-card ${totEnt-totSai>=0?'green':'red'}"><div class="kpi-label">Resultado</div><div class="kpi-value">${brl(totEnt-totSai)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Notas Fiscais</div><div class="kpi-value">${(nfs||[]).length}</div><div class="kpi-trend up">Entradas de estoque</div></div>
+    </div>
+    <div class="alert alert-info">
+      Clique nos botões acima para baixar cada arquivo. Para entregar ao contador: <strong>Receitas.csv + Despesas.csv + Notas Fiscais do mês</strong>.
+    </div>
+  `;
+}
+
+async function exportarReceitasCSV(periodo) {
+  const ini=periodo+'-01', fim=periodo+'-31';
+  const {data} = await getSB().from('financeiro_entradas').select('*').eq('status','recebido').gte('data_recebimento',ini).lte('data_recebimento',fim);
+  const header = 'Data,Descricao,Categoria,Valor,Forma Pagamento\n';
+  const rows = (data||[]).map(r=>`${r.data_recebimento},"${r.descricao}","${r.categoria||''}",${r.valor},"${r.forma_pagamento||''}"`).join('\n');
+  baixarCSV('﻿'+header+rows, 'receitas_'+periodo+'.csv');
+}
+async function exportarDespesasCSV(periodo) {
+  const ini=periodo+'-01', fim=periodo+'-31';
+  const {data} = await getSB().from('financeiro_saidas').select('*').eq('status','pago').gte('data_pagamento',ini).lte('data_pagamento',fim);
+  const header = 'Data,Descricao,Categoria,Valor,Fornecedor\n';
+  const rows = (data||[]).map(r=>`${r.data_pagamento},"${r.descricao}","${r.categoria||''}",${r.valor},"${r.fornecedor||''}"`).join('\n');
+  baixarCSV('﻿'+header+rows, 'despesas_'+periodo+'.csv');
+}
+function baixarCSV(conteudo, nome) {
+  const blob = new Blob([conteudo],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=nome; a.click();
+  toast('Exportado: '+nome);
+}
+async function exportarNFsPeriodo(periodo) {
+  const ini=periodo+'-01', fim=periodo+'-31';
+  const {data:movs} = await getSB().from('estoque_movimentos').select('*').eq('tipo','entrada').not('nf_base64','is',null).gte('data_movimento',ini).lte('data_movimento',fim);
+  if (!movs||movs.length===0) { toast('Nenhuma nota fiscal no período','error'); return; }
+  for (let i=0;i<movs.length;i++) {
+    const m=movs[i];
+    const dataUrl=`data:${m.nf_tipo||'application/octet-stream'};base64,${m.nf_base64}`;
+    const nome=`NF_${(m.data_movimento||'').replace(/-/g,'')}_${(m.produto_nome||'prod').replace(/\s+/g,'_')}_${i+1}_${m.nf_nome||'nota'}`;
+    const a=document.createElement('a'); a.href=dataUrl; a.download=nome; a.click();
+    await new Promise(r=>setTimeout(r,350));
+  }
+  toast(movs.length+' nota(s) exportada(s)!');
+}
+
+// ══════════════════════════════════════════════════════════
+// FASE 2.7 — MÓDULO DE RECLAMAÇÕES
+// ══════════════════════════════════════════════════════════
+async function renderReclamacoes(el) {
+  document.getElementById('topbar-actions').innerHTML =
+    `<button class="btn btn-primary" onclick="abrirFormReclamacao()">+ Nova Reclamação</button>`;
+
+  const {data:lista} = await getSB()
+    .from('os_reclamacoes')
+    .select('*,ordens_servico(numero,clientes(nome),veiculos(placa))')
+    .order('created_at',{ascending:false});
+
+  const corStatus = {aberta:'var(--red)',em_analise:'var(--amber)',resolvida:'var(--green)'};
+  const lbStatus  = {aberta:'Aberta',em_analise:'Em Análise',resolvida:'Resolvida'};
+
+  el.innerHTML = `
+    <div class="card"><div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>Data</th><th>OS</th><th>Cliente</th><th>Reclamação</th><th>Prazo</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        ${(lista||[]).length===0
+          ? `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:2rem">Nenhuma reclamação registrada</td></tr>`
+          : (lista||[]).map(r => {
+              const vencida = r.prazo_resposta && new Date(r.prazo_resposta) < new Date() && r.status!=='resolvida';
+              return `<tr>
+                <td>${brData(r.data_reclamacao)}</td>
+                <td><strong>${r.ordens_servico?.numero||'—'}</strong></td>
+                <td>${r.ordens_servico?.clientes?.nome||'—'}<br><span style="font-size:.72rem;color:var(--muted)">${r.ordens_servico?.veiculos?.placa||''}</span></td>
+                <td style="max-width:200px;font-size:.82rem">${r.descricao_cliente||'—'}</td>
+                <td style="color:${vencida?'var(--red)':'inherit'};font-weight:${vencida?'700':'400'}">${brData(r.prazo_resposta)}</td>
+                <td><span style="color:${corStatus[r.status]||'inherit'};font-weight:700">${lbStatus[r.status]||r.status}</span></td>
+                <td><button class="btn btn-secondary btn-sm" onclick="abrirReclamacao('${r.id}')">Ver</button></td>
+              </tr>`;
+            }).join('')
+        }
+      </tbody>
+    </table></div></div></div>
+  `;
+}
+
+async function abrirFormReclamacao() {
+  const {data:osList} = await getSB()
+    .from('ordens_servico')
+    .select('id,numero,clientes(nome)')
+    .in('status',['pago','pronto_retirada'])
+    .order('data_entrada',{ascending:false})
+    .limit(50);
+
+  openModal('Nova Reclamação','',`
+    <div class="form-group"><label class="req">OS Relacionada</label>
+      <select id="rec-os">
+        <option value="">Selecione a OS...</option>
+        ${(osList||[]).map(o=>`<option value="${o.id}">OS ${o.numero} — ${o.clientes?.nome||''}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="req">Data da Reclamação</label><input type="date" id="rec-data" value="${isoHoje()}"></div>
+      <div class="form-group"><label class="req">Prazo de Resposta</label><input type="date" id="rec-prazo" value="${(() => { const d=new Date(); d.setDate(d.getDate()+30); return d.toISOString().substring(0,10); })()}"></div>
+    </div>
+    <div class="form-group"><label class="req">Descrição do Cliente</label>
+      <textarea id="rec-desc" placeholder="O que o cliente relatou..."></textarea>
+    </div>
+    <div class="form-group"><label>Status</label>
+      <select id="rec-status">
+        <option value="aberta">Aberta</option>
+        <option value="em_analise">Em Análise</option>
+        <option value="resolvida">Resolvida</option>
+      </select>
+    </div>
+  `,`<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" onclick="salvarReclamacao()">Registrar</button>`);
+}
+
+async function salvarReclamacao() {
+  const osId   = document.getElementById('rec-os').value;
+  const data   = document.getElementById('rec-data').value;
+  const prazo  = document.getElementById('rec-prazo').value;
+  const desc   = document.getElementById('rec-desc').value.trim();
+  const status = document.getElementById('rec-status').value;
+  if (!osId)  { toast('Selecione a OS','error'); return; }
+  if (!desc)  { toast('Descrição é obrigatória','error'); return; }
+  const {error} = await getSB().from('os_reclamacoes').insert({
+    os_id:osId, data_reclamacao:data, prazo_resposta:prazo,
+    descricao_cliente:desc, status
+  });
+  if (error) { toast('Erro: '+error.message,'error'); return; }
+  toast('Reclamação registrada!'); closeModal(); renderReclamacoes(document.getElementById('fin-content'));
+}
+
+async function abrirReclamacao(id) {
+  const {data:r} = await getSB().from('os_reclamacoes').select('*,ordens_servico(numero,clientes(nome))').eq('id',id).single();
+  if (!r) return;
+  openModal(`Reclamação — OS ${r.ordens_servico?.numero||''}`, r.ordens_servico?.clientes?.nome||'', `
+    <div class="form-row">
+      <div class="form-group"><label>Data</label><input type="date" id="re-data" value="${r.data_reclamacao||''}"></div>
+      <div class="form-group"><label>Prazo de Resposta</label><input type="date" id="re-prazo" value="${r.prazo_resposta||''}"></div>
+    </div>
+    <div class="form-group"><label class="req">Descrição do Cliente</label>
+      <textarea id="re-desc">${r.descricao_cliente||''}</textarea></div>
+    <div class="form-group"><label>Análise da Oficina</label>
+      <textarea id="re-analise" placeholder="Diagnóstico do problema...">${r.analise_oficina||''}</textarea></div>
+    <div class="form-group"><label>Resolução</label>
+      <textarea id="re-resolucao" placeholder="Como foi resolvido...">${r.resolucao||''}</textarea></div>
+    <div class="form-group"><label>Status</label>
+      <select id="re-status">
+        <option value="aberta" ${r.status==='aberta'?'selected':''}>Aberta</option>
+        <option value="em_analise" ${r.status==='em_analise'?'selected':''}>Em Análise</option>
+        <option value="resolvida" ${r.status==='resolvida'?'selected':''}>Resolvida</option>
+      </select>
+    </div>
+  `,`<button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
+     <button class="btn btn-primary" onclick="atualizarReclamacao('${id}')">Salvar</button>`);
+}
+
+async function atualizarReclamacao(id) {
+  const {error} = await getSB().from('os_reclamacoes').update({
+    data_reclamacao:     document.getElementById('re-data').value,
+    prazo_resposta:      document.getElementById('re-prazo').value,
+    descricao_cliente:   document.getElementById('re-desc').value.trim(),
+    analise_oficina:     document.getElementById('re-analise').value.trim(),
+    resolucao:           document.getElementById('re-resolucao').value.trim(),
+    status:              document.getElementById('re-status').value
+  }).eq('id',id);
+  if (error) { toast('Erro: '+error.message,'error'); return; }
+  toast('Atualizado!'); closeModal(); renderReclamacoes(document.getElementById('fin-content'));
+}
+
+// ══════════════════════════════════════════════════════════
+// FASE 2.8 — CHECKLIST DE CONFORMIDADE JURÍDICA
+// ══════════════════════════════════════════════════════════
+async function renderChecklistJuridico(el) {
+  document.getElementById('topbar-actions').innerHTML = '';
+  const {data:cfgList} = await getSB().from('configuracoes').select('chave,valor');
+  const cfg = {}; (cfgList||[]).forEach(c=>cfg[c.chave]=c.valor);
+
+  const itens = [
+    {k:'chk_contrato_descarte_oleo',  titulo:'Contrato com empresa coletora de óleo',       desc:'Resolução CONAMA 362/2005 — obrigatório para descarte de óleo lubrificante usado.', icon:'🛢️'},
+    {k:'chk_cnae_correto',            titulo:'CNAE da empresa está correto',                 desc:'CNAE 4520-0/01 a 08 para oficinas. CNAE errado pode invalidar alvarás e seguros.', icon:'📋'},
+    {k:'chk_alvara_funcionamento',    titulo:'Alvará de funcionamento em dia',               desc:'Renovação anual obrigatória. Verificar vencimento com a prefeitura.', icon:'🏢'},
+    {k:'chk_avcb',                    titulo:'AVCB / Laudo do Corpo de Bombeiros',           desc:'Obrigatório para estabelecimentos acima de 750m² (varia por município).', icon:'🔥'},
+    {k:'chk_registro_ponto',          titulo:'Registro de ponto dos funcionários',           desc:'CLT art. 74 — obrigatório acima de 2 funcionários. Manter por 5 anos.', icon:'⏱️'},
+    {k:'chk_acordo_compensacao',      titulo:'Acordo de compensação de horas assinado',      desc:'Previne passivo trabalhista por horas extras não pagas.', icon:'📝'},
+    {k:'chk_lgpd',                    titulo:'Política de privacidade (LGPD)',               desc:'O sistema armazena CPF e dados dos clientes — é necessário ter política de uso.', icon:'🔒'},
+    {k:'chk_nf_fornecedores',         titulo:'Exigindo NF de todos os fornecedores',         desc:'Toda peça que entra precisa de NF. Protege contra autuação e garante rastreabilidade.', icon:'🧾'},
+    {k:'chk_garantia_servicos',       titulo:'Informando garantia de 90 dias ao cliente',   desc:'CDC exige garantia mínima de 90 dias em serviços. PDF do recibo já inclui.', icon:'🛡️'},
+    {k:'chk_aprovacao_orcamento',     titulo:'Colhendo aprovação antes de iniciar serviço', desc:'CDC art. 39 — proibido executar serviço sem autorização do cliente.', icon:'✅'},
+    {k:'chk_os_assinada',             titulo:'OS inclui tipo de peça (original/paralela)',   desc:'Protege a oficina em caso de disputa sobre qualidade do material usado.', icon:'🔩'},
+    {k:'chk_simples_nacional',        titulo:'Enquadramento tributário revisado',            desc:'Verificar se os anexos do Simples cobrem corretamente serviço + venda de peças.', icon:'💰'},
+  ];
+
+  el.innerHTML = `
+    <div class="alert alert-info" style="margin-bottom:1rem">
+      Marque os itens que já estão em conformidade. Use como guia para orientar o cliente da consultoria.
+    </div>
+    <div style="display:flex;flex-direction:column;gap:.6rem">
+      ${itens.map(item => {
+        const ok = cfg[item.k] === 'sim';
+        return `
+          <div style="display:flex;align-items:flex-start;gap:.85rem;padding:1rem 1.1rem;background:${ok?'#f0fdf4':'var(--bg)'};border:1.5px solid ${ok?'#86efac':'var(--border)'};border-radius:.65rem;transition:.2s">
+            <div style="font-size:1.35rem;line-height:1;flex-shrink:0;margin-top:.1rem">${item.icon}</div>
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:.9rem;margin-bottom:.2rem">${item.titulo}</div>
+              <div style="font-size:.78rem;color:var(--muted);line-height:1.5">${item.desc}</div>
+            </div>
+            <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;flex-shrink:0;font-size:.82rem;font-weight:600;color:${ok?'var(--green)':'var(--muted)'}">
+              <input type="checkbox" ${ok?'checked':''} onchange="salvarCheckJur('${item.k}',this.checked)"
+                style="width:18px;height:18px;cursor:pointer;accent-color:var(--green)">
+              ${ok?'OK':'Pendente'}
+            </label>
+          </div>`;
+      }).join('')}
+    </div>
+  `;
+}
+
+async function salvarCheckJur(chave, valor) {
+  await getSB().from('configuracoes').upsert({chave, valor: valor?'sim':'nao'},{onConflict:'chave'});
+  toast(valor ? '✅ Marcado como OK' : 'Desmarcado', valor?'success':'info');
+}
+
 async function renderFinanceiro(el) {
   el.innerHTML = `
     <div class="tabs">
-      ${[['entradas','Entradas'],['saidas','Saídas'],['pagar','A Pagar'],['receber','A Receber'],['fluxo','Fluxo de Caixa'],['ofx','Conciliação'],['inadimplencia','Inadimplência'],['notas','Notas Fiscais']].map(([k,l])=>
+      ${[['entradas','Entradas'],['saidas','Saídas'],['pagar','A Pagar'],['receber','A Receber'],['fluxo','Fluxo de Caixa'],['margem','Margem OS'],['ofx','Conciliação'],['inadimplencia','Inadimplência'],['notas','Notas Fiscais']].map(([k,l])=>
         `<button class="tab ${_finTab===k?'active':''}" onclick="switchFinTab('${k}')">${l}</button>`
       ).join('')}
     </div>
@@ -2559,7 +3127,7 @@ async function renderFinanceiro(el) {
 function switchFinTab(tab) {
   _finTab = tab;
   document.querySelectorAll('.tabs .tab').forEach((t,i)=>{
-    const tabKeys=['entradas','saidas','pagar','receber','fluxo','ofx','inadimplencia','notas'];
+    const tabKeys=['entradas','saidas','pagar','receber','fluxo','margem','ofx','inadimplencia','notas'];
     t.classList.toggle('active',tabKeys[i]===tab);
   });
   renderFinTab(tab);
@@ -2575,6 +3143,7 @@ async function renderFinTab(tab) {
   else if (tab==='receber') await renderContasReceber(el);
   else if (tab==='fluxo')   await renderFluxoCaixa(el);
   else if (tab==='ofx')     renderOFX(el);
+  else if (tab==='margem')        await renderMargemOS(el);
   else if (tab==='inadimplencia') await renderInadimplencia(el);
   else if (tab==='notas')         await renderNotasFiscais(el);
 }
