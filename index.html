@@ -166,6 +166,12 @@ tbody tr { cursor: pointer; }
 /* ── BADGES ──────────────────────────────────────────────── */
 .badge { display: inline-flex; align-items: center; padding: .22rem .6rem; border-radius: 999px; font-size: .7rem; font-weight: 700; line-height: 1; white-space: nowrap; }
 .b-nafila    { background: #f1f5f9; color: #475569; }
+.b-prio-urgente { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+.b-prio-vip     { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+.b-prio-normal  { background: #f1f5f9; color: #475569; }
+.b-tipo-original     { background: #d1fae5; color: #065f46; }
+.b-tipo-paralela     { background: #dbeafe; color: #1d4ed8; }
+.b-tipo-recondicionada { background: #fef3c7; color: #92400e; }
 .b-manut     { background: #dbeafe; color: #1d4ed8; }
 .b-aguard    { background: #ffedd5; color: #c2410c; }
 .b-pronto    { background: #d1fae5; color: #065f46; }
@@ -582,6 +588,16 @@ const SL = {'na_fila':'Na Fila','em_manutencao':'Em Manutenção','aguardando_pe
 const SC = {'na_fila':'b-nafila','em_manutencao':'b-manut','aguardando_peca':'b-aguard','pronto_retirada':'b-pronto','pago':'b-pago','cancelado':'b-cancelado'};
 const SR = {'na_fila':'os-row-nafila','em_manutencao':'os-row-manut','aguardando_peca':'os-row-aguard','pronto_retirada':'os-row-pronto','pago':'os-row-pago','cancelado':'os-row-cancelado'};
 function badgeOS(s) { return `<span class="badge ${SC[s]||''}">${SL[s]||s}</span>`; }
+function badgePrio(p) {
+  const map = { urgente: ['b-prio-urgente','⚡ Urgente'], vip: ['b-prio-vip','★ VIP'], normal: ['b-prio-normal','Normal'] };
+  const [cls, txt] = map[p||'normal'] || map.normal;
+  return `<span class="badge ${cls}">${txt}</span>`;
+}
+function badgeTipoPeca(t) {
+  const map = { original: ['b-tipo-original','Original'], paralela: ['b-tipo-paralela','Paralela'], recondicionada: ['b-tipo-recondicionada','Recond.'] };
+  const [cls, txt] = map[t||''] || ['b-prio-normal', t||'—'];
+  return `<span class="badge ${cls}" style="font-size:.65rem">${txt}</span>`;
+}
 
 function msgWhatsApp(os) {
   const cli   = os.clientes;
@@ -698,6 +714,7 @@ async function renderDashboard(el) {
                 const waLink = tel ? `<a class="btn btn-whatsapp btn-sm" href="https://wa.me/55${tel}?text=${encodeURIComponent(msgWhatsApp(o))}" target="_blank">WA</a>` : '—';
                 return `<tr class="${SR[o.status]||''}" onclick="abrirDetalhOS('${o.id}')">
                   <td><strong>${o.numero}</strong></td>
+                  <td>${badgePrio(o.prioridade)}</td>
                   <td>${o.clientes?.nome||'—'}</td>
                   <td>${o.veiculos?.placa||''} ${o.veiculos?.modelo||''}</td>
                   <td>${badgeOS(o.status)}</td>
@@ -792,7 +809,7 @@ async function renderOrdens(el) {
   document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary" onclick="abrirNovaOS()">+ Nova OS</button>`;
 
   let query = getSB().from('ordens_servico')
-    .select('id,numero,status,valor_total,data_entrada,data_previsao,avaliacao,clientes(nome,telefone,cpf),veiculos(placa,modelo,marca)')
+    .select('id,numero,status,prioridade,valor_total,data_entrada,data_previsao,avaliacao,clientes(nome,telefone,cpf),veiculos(placa,modelo,marca)')
     .order('data_entrada',{ascending:false});
   if (_osFilter!=='todos') query = query.eq('status',_osFilter);
 
@@ -819,7 +836,7 @@ async function renderOrdens(el) {
       <div class="card-body" style="padding:0">
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Número</th><th>Cliente</th><th>Veículo</th><th>Status</th><th>Entrada</th><th>Previsão</th><th>Total</th><th>Aval.</th><th>WA</th></tr></thead>
+            <thead><tr><th>Número</th><th>Prior.</th><th>Cliente</th><th>Veículo</th><th>Status</th><th>Entrada</th><th>Previsão</th><th>Total</th><th>Aval.</th><th>WA</th></tr></thead>
             <tbody>
               ${filtrada.length===0?`<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:2rem">Nenhuma OS encontrada</td></tr>`
               :filtrada.map(o=>{
@@ -827,6 +844,7 @@ async function renderOrdens(el) {
                 const waLink = tel ? `<a class="btn btn-whatsapp btn-sm" href="https://wa.me/55${tel}?text=${encodeURIComponent(msgWhatsApp(o))}" target="_blank" onclick="event.stopPropagation()">WA</a>` : '—';
                 return `<tr class="${SR[o.status]||''}" onclick="abrirDetalhOS('${o.id}')">
                   <td><strong>${o.numero}</strong></td>
+                  <td>${badgePrio(o.prioridade)}</td>
                   <td>${o.clientes?.nome||'—'}</td>
                   <td>${o.veiculos?.placa||''} ${o.veiculos?.marca||''} ${o.veiculos?.modelo||''}</td>
                   <td>${badgeOS(o.status)}</td>
@@ -847,9 +865,11 @@ async function renderOrdens(el) {
 
 async function abrirDetalhOS(id) {
   const sb = getSB();
-  const [{data:os},{data:itens}] = await Promise.all([
+  const [{data:os},{data:itens},{data:statusLog},{data:fotos}] = await Promise.all([
     sb.from('ordens_servico').select('*,clientes(*),veiculos(*)').eq('id',id).single(),
-    sb.from('os_itens').select('*').eq('os_id',id)
+    sb.from('os_itens').select('*').eq('os_id',id),
+    sb.from('os_status_log').select('*').eq('os_id',id).order('created_at'),
+    sb.from('os_fotos').select('*').eq('os_id',id).order('created_at')
   ]);
   if (!os) return;
 
@@ -860,19 +880,64 @@ async function abrirDetalhOS(id) {
   const waLink  = tel ? `<a class="btn btn-whatsapp" href="https://wa.me/55${tel}?text=${encodeURIComponent(waTxt)}" target="_blank">WhatsApp Cliente</a>` : '';
 
   const itensHtml = (itens||[]).map(i=>`<tr>
-    <td><span class="badge ${i.tipo==='servico'?'b-servico':'b-peca'}">${i.tipo==='servico'?'Serviço':'Peça'}</span></td>
+    <td><span class="badge ${i.tipo==='servico'?'b-servico':'b-peca'}">${i.tipo==='servico'?'Serviço':'Peça'}</span>${i.tipo==='peca'&&i.tipo_peca?` ${badgeTipoPeca(i.tipo_peca)}`:''}
+    </td>
     <td>${i.descricao}</td><td>${i.quantidade}</td>
     <td>${brl(i.valor_unitario)}</td><td>${brl(i.valor_total)}</td>
   </tr>`).join('');
+
+  // Timeline de status
+  const statusLabels = {'na_fila':'Na Fila','em_manutencao':'Em Manutenção','aguardando_peca':'Aguard. Peça','pronto_retirada':'Pronto','pago':'Pago','cancelado':'Cancelado'};
+  const timelineHtml = (statusLog&&statusLog.length>1) ? (() => {
+    let rows = '';
+    for (let i=0;i<statusLog.length;i++) {
+      const s = statusLog[i];
+      const next = statusLog[i+1];
+      let durStr = '';
+      if (next) {
+        const mins = Math.round((new Date(next.created_at)-new Date(s.created_at))/60000);
+        durStr = mins < 60 ? `${mins}min` : `${Math.floor(mins/60)}h${mins%60>0?` ${mins%60}min`:''}`;
+      }
+      rows += `<div style="display:flex;align-items:center;gap:.5rem;font-size:.78rem;padding:.25rem 0">
+        <span style="width:10px;height:10px;border-radius:50%;background:${next?'#10b981':'#f59e0b'};flex-shrink:0"></span>
+        <span style="color:var(--muted)">${new Date(s.created_at).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
+        <strong>${statusLabels[s.status]||s.status}</strong>
+        ${durStr?`<span style="color:var(--muted)">→ ${durStr}</span>`:''}
+      </div>`;
+    }
+    return `<div class="form-section">Histórico de Status</div><div style="background:var(--bg);padding:.65rem .85rem;border-radius:.5rem;margin-bottom:.75rem">${rows}</div>`;
+  })() : '';
+
+  // Botões de mudança de status
+  const statusBtns = ['na_fila','em_manutencao','aguardando_peca','pronto_retirada','pago','cancelado']
+    .filter(s=>s!==os.status)
+    .map(s=>`<button class="btn btn-secondary btn-sm" onclick="mudarStatusOS('${os.id}','${s}',this)" style="font-size:.72rem">${SL[s]||s}</button>`)
+    .join('');
+
+  // Aprovação de orçamento
+  const aprovHtml = os.aprovacao_status==='aprovado'
+    ? `<div style="background:#d1fae5;color:#065f46;padding:.5rem .85rem;border-radius:.5rem;font-size:.8rem;margin-bottom:.75rem">✅ Orçamento aprovado pelo cliente</div>`
+    : `<div style="background:#fef3c7;padding:.5rem .85rem;border-radius:.5rem;font-size:.8rem;margin-bottom:.75rem;display:flex;align-items:center;justify-content:space-between">
+        <span>⏳ Aguardando aprovação do cliente</span>
+        <button class="btn btn-primary btn-sm" onclick="enviarAprovacaoWA('${os.id}','${os.numero}','${os.clientes?.telefone||''}',${os.valor_total})">Enviar p/ WA</button>
+       </div>`;
 
   openModal(`OS ${os.numero}`, `${os.clientes?.nome||''} — ${os.veiculos?.placa||''}`, `
     <div class="form-row" style="margin-bottom:.75rem">
       <div><div style="font-size:.73rem;color:var(--muted);text-transform:uppercase;font-weight:700">Cliente</div><div style="font-weight:600">${os.clientes?.nome||'—'}</div><div style="font-size:.8rem;color:var(--muted)">${os.clientes?.telefone||''}</div></div>
       <div><div style="font-size:.73rem;color:var(--muted);text-transform:uppercase;font-weight:700">Veículo</div><div style="font-weight:600">${os.veiculos?.placa||''} ${os.veiculos?.marca||''} ${os.veiculos?.modelo||''}</div><div style="font-size:.8rem;color:var(--muted)">${os.veiculos?.ano||''} — ${os.veiculos?.cor||''}</div></div>
-      <div><div style="font-size:.73rem;color:var(--muted);text-transform:uppercase;font-weight:700">Status</div>${badgeOS(os.status)}</div>
+      <div><div style="font-size:.73rem;color:var(--muted);text-transform:uppercase;font-weight:700">Status</div>${badgeOS(os.status)} ${badgePrio(os.prioridade)}</div>
       <div><div style="font-size:.73rem;color:var(--muted);text-transform:uppercase;font-weight:700">KM Entrada</div><div style="font-weight:600">${os.quilometragem_entrada||'—'}</div></div>
     </div>
+    <div style="background:var(--bg);padding:.5rem .85rem;border-radius:.5rem;margin-bottom:.75rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+      <span style="font-size:.72rem;color:var(--muted);font-weight:700;text-transform:uppercase">Mudar status:</span>
+      ${statusBtns}
+    </div>
+    ${aprovHtml}
     ${os.descricao?`<div style="background:var(--bg);padding:.65rem .85rem;border-radius:.5rem;margin-bottom:.75rem;font-size:.85rem"><strong>Reclamação:</strong> ${os.descricao}</div>`:''}
+    <div style="background:#f0fdf4;border:1px solid #86efac;padding:.5rem .85rem;border-radius:.5rem;margin-bottom:.75rem;font-size:.8rem">
+      🛡️ <strong>Garantia:</strong> ${os.garantia_dias||90} dias — válida até ${(() => { const d=new Date(os.data_pagamento||os.created_at||Date.now()); d.setDate(d.getDate()+(os.garantia_dias||90)); return d.toLocaleDateString('pt-BR'); })()}
+    </div>
     <div class="form-section">Serviços e Peças</div>
     <div class="table-wrap" style="margin-bottom:.75rem">
       <table style="font-size:.82rem">
@@ -880,12 +945,21 @@ async function abrirDetalhOS(id) {
         <tbody>${itensHtml}</tbody>
       </table>
     </div>
-    <div style="text-align:right;background:var(--bg);padding:.65rem .85rem;border-radius:.5rem">
+    <div style="text-align:right;background:var(--bg);padding:.65rem .85rem;border-radius:.5rem;margin-bottom:.75rem">
       <div style="font-size:.82rem">Serviços: <strong>${brl(os.valor_servicos)}</strong> | Peças: <strong>${brl(os.valor_pecas)}</strong>${os.desconto>0?` | Desconto: <strong>-${brl(os.desconto)}</strong>`:''}</div>
       <div style="font-size:1.1rem;font-weight:800;margin-top:.3rem">Total: <span style="color:var(--green)">${brl(os.valor_total)}</span></div>
     </div>
+    ${timelineHtml}
     ${os.avaliacao?`<div style="margin-top:.75rem">${starsHtml(os.avaliacao)} <span style="color:var(--muted);font-size:.82rem">${os.comentario_avaliacao||''}</span></div>`:''}
     ${os.forma_pagamento?`<div style="margin-top:.6rem;font-size:.82rem;color:var(--muted)">Pagamento: ${os.forma_pagamento} em ${brData(os.data_pagamento)}</div>`:''}
+    ${fotos&&fotos.length>0?`
+      <div class="form-section">Fotos do Diagnóstico (${fotos.length})</div>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem">
+        ${fotos.map(f=>`<img src="data:image/jpeg;base64,${f.foto_base64}"
+          onclick="verFotoGrande('${f.id}')"
+          style="width:72px;height:72px;object-fit:cover;border-radius:.5rem;border:1.5px solid var(--border);cursor:pointer"
+          title="${f.descricao||f.foto_nome||'Foto'}">`).join('')}
+      </div>`:''}
   `,
   `<button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
    ${waLink}
@@ -921,6 +995,20 @@ async function abrirNovaOS() {
       <div class="form-group">
         <label class="req">KM de Entrada</label>
         <input type="number" id="os-km" placeholder="Ex: 85000" inputmode="numeric">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Prioridade</label>
+        <select id="os-prioridade">
+          <option value="normal">Normal</option>
+          <option value="urgente">⚡ Urgente</option>
+          <option value="vip">★ VIP</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Garantia (dias)</label>
+        <input type="number" id="os-garantia" value="90" min="0" placeholder="90">
       </div>
     </div>
     <div class="form-group">
@@ -996,8 +1084,15 @@ function addOSItem(tipo) {
     : `<input type="text" placeholder="Descrição do serviço..." id="os-desc-${idx}"
          style="background:#fff7ed;border-color:#fed7aa;color:#c2410c" oninput="calcTotalOS()">`;
 
+  const tipoPecaSelect = tipo==='peca'
+    ? `<select id="os-tipopeca-${idx}" style="width:100%;padding:.35rem .5rem;border:1.5px solid #bfdbfe;border-radius:.4rem;font-size:.78rem;font-family:inherit;margin-top:.3rem">
+        <option value="original">Original</option>
+        <option value="paralela">Paralela</option>
+        <option value="recondicionada">Recondicionada</option>
+       </select>` : `<input type="hidden" id="os-tipopeca-${idx}" value="">`;
+
   div.innerHTML = `
-    <div>${prodOpts}</div>
+    <div>${prodOpts}${tipoPecaSelect}</div>
     <div><input type="number" value="1" min="0.01" step="0.01" id="os-qty-${idx}"
       style="${tipo==='peca'?'border-color:#bfdbfe':'border-color:#fed7aa'}" oninput="calcTotalOS()"></div>
     <div><input type="number" value="0" min="0" step="0.01" id="os-unit-${idx}" placeholder="R$ unit."
@@ -1070,7 +1165,8 @@ async function salvarNovaOS() {
       } else {
         descricao = document.getElementById('os-desc-'+idx)?.value||'';
       }
-      if (descricao) { itensSalvar.push({tipo,descricao,quantidade:qty,valor_unitario:unit,valor_total:tot}); }
+      const tipopeca = document.getElementById('os-tipopeca-'+idx)?.value||null;
+      if (descricao) { itensSalvar.push({tipo,descricao,quantidade:qty,valor_unitario:unit,valor_total:tot,tipo_peca:tipopeca}); }
       if (tipo==='servico') svcs+=tot; else pecs+=tot;
     });
   }
@@ -1078,18 +1174,74 @@ async function salvarNovaOS() {
   const total  = svcs+pecs-desconto;
   const numero = `${new Date().getFullYear()}${(new Date().getMonth()+1).toString().padStart(2,'0')}-${Math.floor(Math.random()*9000)+1000}`;
 
+  const prioridade = document.getElementById('os-prioridade')?.value||'normal';
+  const garantia   = parseInt(document.getElementById('os-garantia')?.value)||90;
   const {data:os, error} = await sb.from('ordens_servico').insert({
     numero, cliente_id:cliId, veiculo_id:veicId, descricao:descr,
     data_previsao:previsao||null, quilometragem_entrada:km||null,
-    valor_servicos:svcs, valor_pecas:pecs, desconto, valor_total:total, status:'na_fila'
+    valor_servicos:svcs, valor_pecas:pecs, desconto, valor_total:total,
+    status:'na_fila', prioridade, garantia_dias:garantia
   }).select().single();
   if (error) { toast('Erro: '+error.message,'error'); return; }
   if (itensSalvar.length>0) await sb.from('os_itens').insert(itensSalvar.map(i=>({...i,os_id:os.id})));
+  // Log status inicial
+  await sb.from('os_status_log').insert({os_id:os.id, status:'na_fila'});
 
   const {data:cli} = await sb.from('clientes').select('total_gasto').eq('id',cliId).single();
   await sb.from('clientes').update({ultima_visita:isoHoje(),total_gasto:(Number(cli?.total_gasto)||0)+total}).eq('id',cliId);
 
   toast(`OS ${numero} criada!`,'success');
+  closeModal();
+  App.navigate('ordens');
+}
+
+
+
+function verFotoGrande(fotoId) {
+  // Buscar a foto do cache de OS aberta
+  getSB().from('os_fotos').select('*').eq('id',fotoId).single().then(({data:f})=>{
+    if (!f) return;
+    openModal(f.descricao||'Foto do Diagnóstico','',`
+      <img src="data:${f.foto_tipo||'image/jpeg'};base64,${f.foto_base64}"
+        style="width:100%;border-radius:.5rem;max-height:70vh;object-fit:contain">
+      <div style="font-size:.75rem;color:var(--muted);margin-top:.5rem">${f.foto_nome||''}</div>
+    `,`<button class="btn btn-secondary" onclick="closeModal()">Fechar</button>`);
+  });
+}
+
+// ── MUDAR STATUS OS ─────────────────────────────────────────
+async function mudarStatusOS(osId, novoStatus, btn) {
+  if (btn) { btn.disabled=true; btn.textContent='...'; }
+  const sb = getSB();
+  const {error} = await sb.from('ordens_servico').update({status:novoStatus}).eq('id',osId);
+  if (error) { toast('Erro: '+error.message,'error'); if(btn){btn.disabled=false;btn.textContent=SL[novoStatus]||novoStatus;} return; }
+  await sb.from('os_status_log').insert({os_id:osId, status:novoStatus});
+  toast('Status atualizado: '+(SL[novoStatus]||novoStatus));
+  closeModal();
+  App.navigate('ordens');
+}
+
+// ── APROVAÇÃO DE ORÇAMENTO VIA WHATSAPP ─────────────────────
+async function enviarAprovacaoWA(osId, numero, tel, total) {
+  if (!tel) { toast('Cliente sem telefone cadastrado','error'); return; }
+  // Registra token de aprovação
+  const token = Date.now().toString(36) + Math.random().toString(36).substr(2,5);
+  await getSB().from('ordens_servico').update({aprovacao_token:token, aprovacao_status:'aguardando'}).eq('id',osId);
+  const msg = `Olá! Segue o orçamento da OS *${numero}* no valor de *${brl(total)}*.
+
+Para APROVAR o serviço, responda: *APROVAR ${numero}*
+Para recusar, responda: *RECUSAR ${numero}*
+
+Aguardamos seu retorno!`;
+  const telLimpo = tel.replace(/\D/g,'');
+  window.open(`https://wa.me/55${telLimpo}?text=${encodeURIComponent(msg)}`,'_blank');
+  toast('Mensagem de aprovação enviada!');
+}
+
+// ── CONFIRMAR APROVAÇÃO MANUALMENTE (quando cliente responder) ─
+async function confirmarAprovacaoOS(osId) {
+  await getSB().from('ordens_servico').update({aprovacao_status:'aprovado'}).eq('id',osId);
+  toast('Orçamento marcado como aprovado!');
   closeModal();
   App.navigate('ordens');
 }
@@ -1162,9 +1314,10 @@ async function gerarReciboPDF(osId) {
   (itens||[]).forEach((it,i) => {
     if (i%2===1) { doc.setFillColor(248,249,250); doc.rect(10,y-4,190,8,'F'); }
     doc.setFont('helvetica','bold'); doc.setFontSize(7.5);
-    doc.text(it.tipo==='servico'?'Serviço':'Peça', 14, y);
+    const tipoLabel = it.tipo==='servico' ? 'Serviço' : ('Peça'+(it.tipo_peca?' ('+it.tipo_peca+')':''));
+    doc.text(tipoLabel, 14, y);
     doc.setFont('helvetica','normal');
-    doc.text(it.descricao, 38, y);
+    doc.text(it.descricao, 50, y);
     doc.text(String(it.quantidade), 130, y);
     doc.text(brl(it.valor_unitario), 148, y);
     doc.text(brl(it.valor_total), 196, y, {align:'right'});
@@ -1198,6 +1351,16 @@ async function gerarReciboPDF(osId) {
   doc.setFontSize(7.5);
   doc.text('Assinatura do Cliente', 52, y+5, {align:'center'});
   doc.text('Responsável pela Oficina', 158, y+5, {align:'center'});
+
+  // Rodapé de garantia
+  y += 18;
+  const garantDias = os.garantia_dias||90;
+  const dtGarant = new Date(os.data_pagamento||os.created_at||Date.now());
+  dtGarant.setDate(dtGarant.getDate()+garantDias);
+  doc.setFillColor(240,253,244); doc.rect(10,y-4,190,10,'F');
+  doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(6,95,70);
+  doc.text(`Garantia do serviço: ${garantDias} dias conforme CDC — válida até ${dtGarant.toLocaleDateString('pt-BR')}`, 105, y+2, {align:'center'});
+  doc.setTextColor(0,0,0);
 
   doc.save(`OS-${os.numero}.pdf`);
   toast('PDF gerado!');
