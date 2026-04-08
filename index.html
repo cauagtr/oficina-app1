@@ -1846,53 +1846,209 @@ async function deletarPreventivo(id) {
 // RECOMPENSAS
 // ══════════════════════════════════════════════════════════
 async function renderRecompensas(el) {
-  document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary" onclick="abrirFormRecompensa()">+ Novo Nível</button>`;
-  const [{data:tiers},{data:clis}] = await Promise.all([
-    getSB().from('programa_recompensas').select('*').order('valor_minimo'),
-    getSB().from('clientes').select('id,nome,total_gasto,status,telefone').order('total_gasto',{ascending:false}).limit(20)
+  document.getElementById('topbar-actions').innerHTML =
+    `<button class="btn btn-secondary" onclick="abrirConfigRecompensas()">⚙ Configurar</button>
+     <button class="btn btn-primary" onclick="abrirFormCatalogo()">+ Novo Benefício</button>`;
+
+  const sb = getSB();
+  const [{data:cfgList},{data:catalogo},{data:clis},{data:resgates}] = await Promise.all([
+    sb.from('recompensas_config').select('*').limit(1),
+    sb.from('recompensas_catalogo').select('*').eq('ativo',true).order('pontos_necessarios'),
+    sb.from('clientes').select('id,nome,total_gasto,telefone,status').order('total_gasto',{ascending:false}).limit(30),
+    sb.from('recompensas_resgates').select('cliente_id,pontos_usados').order('created_at',{ascending:false}).limit(200)
   ]);
 
+  const cfg = cfgList?.[0] || {pontos_por_real:1, nivel_prata:500, nivel_ouro:1500};
+
+  const pontosMap = {};
+  (resgates||[]).forEach(r => {
+    if (!pontosMap[r.cliente_id]) pontosMap[r.cliente_id] = {usados:0};
+    pontosMap[r.cliente_id].usados += Number(r.pontos_usados||0);
+  });
+
+  const clisComPontos = (clis||[]).map(c => {
+    const ganhos = Math.floor(Number(c.total_gasto||0) * Number(cfg.pontos_por_real||1));
+    const usados = pontosMap[c.id]?.usados || 0;
+    const saldo  = Math.max(0, ganhos - usados);
+    const nivel  = saldo >= Number(cfg.nivel_ouro||1500) ? 'Ouro'
+                 : saldo >= Number(cfg.nivel_prata||500)  ? 'Prata' : 'Bronze';
+    return {...c, ganhos, usados, saldo, nivel};
+  }).sort((a,b) => b.saldo - a.saldo);
+
+  const corNivel   = {Bronze:'#cd7f32', Prata:'#adb5bd', Ouro:'#f59e0b'};
+  const emojiNivel = {Bronze:'🥉', Prata:'🥈', Ouro:'🥇'};
+
   el.innerHTML = `
+    <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:1rem">
+      <div class="kpi-card"><div class="kpi-label">Pontos por R$ 1</div><div class="kpi-value">${cfg.pontos_por_real||1}</div></div>
+      <div class="kpi-card yellow"><div class="kpi-label">Nível Prata</div><div class="kpi-value">${cfg.nivel_prata||500} pts</div></div>
+      <div class="kpi-card yellow"><div class="kpi-label">Nível Ouro</div><div class="kpi-value">${cfg.nivel_ouro||1500} pts</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Benefícios ativos</div><div class="kpi-value">${(catalogo||[]).length}</div></div>
+    </div>
     <div class="grid-2">
       <div class="card">
-        <div class="card-header"><div class="card-title">Níveis de Recompensa</div></div>
+        <div class="card-header"><div class="card-title">Catálogo de Benefícios</div></div>
         <div class="card-body">
-          ${(tiers||[]).length===0?'<p style="color:var(--muted)">Nenhum nível cadastrado.</p>'
-          :(tiers||[]).map(t=>`
-            <div class="reward-tier">
-              <div class="reward-icon">★</div>
-              <div style="flex:1">
-                <div style="font-weight:700;font-size:.88rem">${t.descricao_recompensa}</div>
-                <div style="font-size:.75rem;color:var(--muted)">A partir de ${brl(t.valor_minimo)}</div>
-              </div>
-              <button class="btn-icon btn-sm" onclick="abrirFormRecompensa('${t.id}')">✏</button>
-              <button class="btn-icon btn-sm" onclick="deletarRecompensa('${t.id}')">✕</button>
-            </div>`).join('')}
+          ${(catalogo||[]).length===0
+            ? '<p style="color:var(--muted);font-size:.85rem">Nenhum benefício. Clique em "+ Novo Benefício".</p>'
+            : (catalogo||[]).map(b=>`
+              <div style="display:flex;align-items:center;gap:.65rem;padding:.6rem 0;border-bottom:1px solid var(--border)">
+                <div style="width:38px;height:38px;border-radius:50%;background:#fef3c7;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0">🎁</div>
+                <div style="flex:1">
+                  <div style="font-weight:700;font-size:.88rem">${b.nome}</div>
+                  <div style="font-size:.73rem;color:var(--muted)">${b.descricao||''}</div>
+                </div>
+                <div style="text-align:right;flex-shrink:0">
+                  <div style="font-weight:800;font-size:.88rem;color:var(--amber)">${b.pontos_necessarios} pts</div>
+                  <div style="display:flex;gap:.25rem;margin-top:.25rem">
+                    <button class="btn btn-secondary btn-sm" onclick="abrirFormCatalogo('${b.id}')">✏</button>
+                    <button class="btn btn-danger btn-sm" onclick="deletarCatalogo('${b.id}')">✕</button>
+                  </div>
+                </div>
+              </div>`).join('')}
         </div>
       </div>
       <div class="card">
-        <div class="card-header"><div class="card-title">Top Clientes</div></div>
-        <div class="card-body">
-          ${(clis||[]).map(c=>{
-            const ganhas = (tiers||[]).filter(t=>Number(c.total_gasto||0)>=Number(t.valor_minimo));
-            const tel    = c.telefone?.replace(/\D/g,'');
-            const waLink = tel&&ganhas.length ? `https://wa.me/55${tel}?text=${encodeURIComponent(`Fala ${c.nome}, como está? Vi aqui que você tem ${ganhas.length} recompensa(s) disponível(is)!! Venha em nossa oficina e resgate seu prêmio!!`)}` : '';
-            return `<div style="display:flex;align-items:center;justify-content:space-between;padding:.55rem 0;border-bottom:1px solid var(--border)">
-              <div style="cursor:pointer" onclick="verHistoricoClienteTopOS('${c.id}','${c.nome.replace(/'/g,"\\'")}')">
-                <div style="font-weight:600;font-size:.85rem">${c.nome}</div>
-                <div style="font-size:.73rem;color:var(--muted)">${ganhas.length} recompensa(s)</div>
-              </div>
-              <div style="display:flex;align-items:center;gap:.5rem">
-                <strong style="font-size:.85rem">${brl(c.total_gasto||0)}</strong>
-                ${waLink?`<a class="btn btn-whatsapp btn-sm" href="${waLink}" target="_blank">WA</a>`:''}
-              </div>
-            </div>`;
-          }).join('')}
+        <div class="card-header"><div class="card-title">Ranking de Pontos</div></div>
+        <div class="card-body" style="padding:0">
+          <div class="table-wrap"><table>
+            <thead><tr><th>#</th><th>Cliente</th><th>Nível</th><th>Saldo</th><th></th></tr></thead>
+            <tbody>
+              ${clisComPontos.slice(0,15).map((c,i)=>{
+                const tel = c.telefone?.replace(/\D/g,'');
+                const cor = corNivel[c.nivel];
+                const msg = `Olá ${c.nome}! Você tem ${c.saldo} pontos no programa de fidelidade. ${c.saldo>0?'Venha resgatar seus benefícios!':'Continue com a gente para acumular pontos!'}`;
+                return `<tr>
+                  <td style="color:var(--muted);font-weight:700">${i+1}</td>
+                  <td>
+                    <div style="font-weight:600;font-size:.85rem;cursor:pointer" onclick="abrirResgateCliente('${c.id}','${c.nome.replace(/'/g,"\'")}',${c.saldo})">${c.nome}</div>
+                    <div style="font-size:.72rem;color:var(--muted)">${c.ganhos} ganhos · ${c.usados} usados</div>
+                  </td>
+                  <td><span style="font-weight:700;color:${cor}">${emojiNivel[c.nivel]} ${c.nivel}</span></td>
+                  <td><strong style="color:var(--amber)">${c.saldo}</strong></td>
+                  <td>${tel?`<a class="btn btn-whatsapp btn-sm" href="https://wa.me/55${tel}?text=${encodeURIComponent(msg)}" target="_blank">WA</a>`:''}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table></div>
         </div>
       </div>
     </div>
   `;
 }
+
+async function abrirConfigRecompensas() {
+  const {data:cfg} = await getSB().from('recompensas_config').select('*').limit(1);
+  const cc = cfg?.[0] || {};
+  openModal('Configurar Programa de Pontos','',`
+    <div class="alert alert-info">Define como os pontos são calculados e os limites de cada nível.</div>
+    <div class="form-row">
+      <div class="form-group"><label class="req">Pontos por R$ 1,00 gasto</label>
+        <input type="number" id="rc-ppr" value="${cc.pontos_por_real||1}" min="0.1" step="0.1"></div>
+      <div class="form-group"><label class="req">Pontos para Nível Prata</label>
+        <input type="number" id="rc-prata" value="${cc.nivel_prata||500}" min="1"></div>
+    </div>
+    <div class="form-group"><label class="req">Pontos para Nível Ouro</label>
+      <input type="number" id="rc-ouro" value="${cc.nivel_ouro||1500}" min="1"></div>
+  `,`<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" onclick="salvarConfigRecompensas()">Salvar</button>`);
+}
+
+async function salvarConfigRecompensas() {
+  const dados = {
+    pontos_por_real: parseFloat(document.getElementById('rc-ppr').value)||1,
+    nivel_prata:     parseInt(document.getElementById('rc-prata').value)||500,
+    nivel_ouro:      parseInt(document.getElementById('rc-ouro').value)||1500,
+  };
+  const {data:existe} = await getSB().from('recompensas_config').select('id').limit(1);
+  let error;
+  if (existe?.length) { ({error}=await getSB().from('recompensas_config').update(dados).eq('id',existe[0].id)); }
+  else { ({error}=await getSB().from('recompensas_config').insert(dados)); }
+  if (error) { toast('Erro: '+error.message,'error'); return; }
+  toast('Configuração salva!'); closeModal(); App.navigate('recompensas');
+}
+
+async function abrirFormCatalogo(id=null) {
+  let b = {};
+  if (id) { const {data}=await getSB().from('recompensas_catalogo').select('*').eq('id',id).single(); b=data||{}; }
+  openModal(id?'Editar Benefício':'Novo Benefício','',`
+    <div class="form-group"><label class="req">Nome do Benefício</label>
+      <input type="text" id="bc-nome" value="${b.nome||''}" placeholder="Ex: Troca de óleo grátis"></div>
+    <div class="form-group"><label>Descrição</label>
+      <input type="text" id="bc-desc" value="${b.descricao||''}" placeholder="Detalhes"></div>
+    <div class="form-group"><label class="req">Pontos necessários</label>
+      <input type="number" id="bc-pts" value="${b.pontos_necessarios||100}" min="1"></div>
+  `,`<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" onclick="salvarCatalogo(${id?`'${id}'`:'null'})">Salvar</button>`);
+}
+
+async function salvarCatalogo(id) {
+  const nome = document.getElementById('bc-nome').value.trim();
+  if (!nome) { toast('Nome é obrigatório','error'); return; }
+  const dados = {
+    nome, ativo:true,
+    descricao:          document.getElementById('bc-desc').value.trim()||null,
+    pontos_necessarios: parseInt(document.getElementById('bc-pts').value)||100
+  };
+  let error;
+  if (id) { ({error}=await getSB().from('recompensas_catalogo').update(dados).eq('id',id)); }
+  else    { ({error}=await getSB().from('recompensas_catalogo').insert(dados)); }
+  if (error) { toast('Erro: '+error.message,'error'); return; }
+  toast('Salvo!'); closeModal(); App.navigate('recompensas');
+}
+
+async function deletarCatalogo(id) {
+  if (!confirm('Remover este benefício?')) return;
+  await getSB().from('recompensas_catalogo').delete().eq('id',id);
+  toast('Removido','info'); App.navigate('recompensas');
+}
+
+async function abrirResgateCliente(cliId, nome, saldoAtual) {
+  const [{data:catalogo},{data:historico}] = await Promise.all([
+    getSB().from('recompensas_catalogo').select('*').eq('ativo',true).order('pontos_necessarios'),
+    getSB().from('recompensas_resgates').select('*,recompensas_catalogo(nome)').eq('cliente_id',cliId).order('created_at',{ascending:false}).limit(10)
+  ]);
+  const disponiveis = (catalogo||[]).filter(b=>b.pontos_necessarios<=saldoAtual);
+  openModal(`Resgates — ${nome}`, `Saldo: ${saldoAtual} pontos`, `
+    <div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:.65rem;padding:1rem;text-align:center;margin-bottom:1rem">
+      <div style="font-size:2.2rem;font-weight:800;color:#f59e0b;line-height:1">${saldoAtual}</div>
+      <div style="font-size:.72rem;color:rgba(255,255,255,.45);text-transform:uppercase;letter-spacing:.1em;margin-top:.2rem">Pontos disponíveis</div>
+    </div>
+    <div class="form-section">Resgatar Benefício</div>
+    ${disponiveis.length===0
+      ? '<p style="color:var(--muted);font-size:.85rem">Nenhum benefício disponível para este saldo.</p>'
+      : `<div class="form-group"><label class="req">Benefício</label>
+         <select id="res-ben">
+           <option value="">Selecione...</option>
+           ${disponiveis.map(b=>`<option value="${b.id}" data-pts="${b.pontos_necessarios}">${b.nome} — ${b.pontos_necessarios} pts</option>`).join('')}
+         </select></div>
+         <button class="btn btn-primary btn-full" onclick="confirmarResgate('${cliId}',${saldoAtual})">Confirmar Resgate</button>`}
+    ${(historico||[]).length>0?`
+      <div class="form-section">Histórico</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Data</th><th>Benefício</th><th>Pontos</th></tr></thead>
+        <tbody>${(historico||[]).map(r=>`<tr>
+          <td>${brData(r.created_at)}</td>
+          <td>${r.recompensas_catalogo?.nome||'—'}</td>
+          <td style="color:var(--red);font-weight:700">-${r.pontos_usados}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`:''}
+  `,`<button class="btn btn-secondary" onclick="closeModal()">Fechar</button>`, true);
+}
+
+async function confirmarResgate(cliId, saldoAtual) {
+  const sel = document.getElementById('res-ben');
+  const benId = sel?.value;
+  const pts   = parseInt(sel?.options[sel.selectedIndex]?.dataset?.pts)||0;
+  if (!benId) { toast('Selecione um benefício','error'); return; }
+  if (pts > saldoAtual) { toast('Pontos insuficientes','error'); return; }
+  const {error} = await getSB().from('recompensas_resgates').insert({
+    cliente_id:cliId, catalogo_id:benId, pontos_usados:pts
+  });
+  if (error) { toast('Erro: '+error.message,'error'); return; }
+  toast('Resgate registrado! 🎁'); closeModal(); App.navigate('recompensas');
+}
+
 
 async function verHistoricoClienteTopOS(cliId, nome) {
   const {data:osList} = await getSB().from('ordens_servico').select('numero,status,valor_total,data_entrada,veiculos(placa)').eq('cliente_id',cliId).order('data_entrada',{ascending:false});
