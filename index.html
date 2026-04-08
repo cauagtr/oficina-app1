@@ -381,6 +381,7 @@ tbody tr { cursor: pointer; }
       <div class="nav-item" data-page="relat_contador"  onclick="App.navigate('relat_contador')"><span class="nav-icon">📁</span> Rel. Contador</div>
       <div class="nav-item" data-page="reclamacoes"     onclick="App.navigate('reclamacoes')"><span class="nav-icon">⚠️</span> Reclamações</div>
       <div class="nav-item" data-page="conformidade"    onclick="App.navigate('conformidade')"><span class="nav-icon">⚖️</span> Conformidade</div>
+      <div class="nav-item" data-page="servicos_pub"    onclick="App.navigate('servicos_pub')"><span class="nav-icon">🛎️</span> Serviços Públicos</div>
       <div class="nav-section">Sistema</div>
       <div class="nav-item" data-page="configuracoes"      onclick="App.navigate('configuracoes')"><span class="nav-icon">◎</span> Configurações</div>
     </nav>
@@ -593,6 +594,7 @@ const PAGES = {
   financeiro:   { title:'Financeiro',         sub:'Receitas, despesas e fluxo', render: renderFinanceiro   },
   relatorios:   { title:'Relatórios',         sub:'Análises exportáveis',       render: renderRelatorios   },
   configuracoes:{ title:'Configurações',      sub:'Dados da oficina',           render: renderConfiguracoes},
+  servicos_pub: { title:'Serviços Públicos',   sub:'Vitrine no portal do cliente', render: renderServicosPublicos},
 };
 
 // ── STATUS HELPERS ──────────────────────────────────────────
@@ -3587,11 +3589,19 @@ async function renderConfiguracoes(el) {
         <div class="card-body">
           <div class="form-group"><label>Nome da Oficina</label><input type="text" id="cfg-nome" value="${cfg['nome_mecanica']||''}"></div>
           <div class="form-group"><label>CNPJ</label><input type="text" id="cfg-cnpj" value="${cfg['cnpj_mecanica']||''}" maxlength="18"></div>
-          <div class="form-group"><label>Telefone</label><input type="text" id="cfg-tel" value="${cfg['telefone_mecanica']||''}" maxlength="15"></div>
-          <div class="form-group"><label>E-mail</label><input type="email" id="cfg-email" value="${cfg['email_mecanica']||''}"></div>
-          <div class="form-group"><label>Endereço</label><input type="text" id="cfg-end" value="${cfg['endereco_mecanica']||''}"></div>
+          <div class="form-row">
+            <div class="form-group"><label>Telefone / WhatsApp</label><input type="text" id="cfg-tel" value="${cfg['telefone_mecanica']||''}" maxlength="15"></div>
+            <div class="form-group"><label>E-mail</label><input type="email" id="cfg-email" value="${cfg['email_mecanica']||''}"></div>
+          </div>
+          <div class="form-group"><label>Endereço Completo</label><input type="text" id="cfg-end" value="${cfg['endereco_mecanica']||''}" placeholder="Rua, número, bairro, cidade"></div>
+          <div class="form-group"><label>Link Google Maps</label><input type="url" id="cfg-maps" value="${cfg['maps_link']||''}" placeholder="https://maps.app.goo.gl/..."></div>
+          <div class="form-row">
+            <div class="form-group"><label>Instagram</label><input type="text" id="cfg-ig" value="${cfg['instagram']||''}" placeholder="@suaoficina"></div>
+            <div class="form-group"><label>Horário de Funcionamento</label><input type="text" id="cfg-horario" value="${cfg['horario_funcionamento']||''}" placeholder="Seg-Sex 8h-18h, Sáb 8h-13h"></div>
+          </div>
           <div class="form-group"><label>URL do Logo</label><input type="url" id="cfg-logo" value="${cfg['logo_url']||''}" placeholder="https://..."></div>
-          ${cfg['logo_url']?`<div style="margin-top:.5rem"><img src="${cfg['logo_url']}" alt="Logo" style="height:60px;border-radius:.4rem;border:1px solid var(--border)"></div>`:''}
+          <div class="form-group"><label>URL Foto de Capa (banner do App 3)</label><input type="url" id="cfg-capa" value="${cfg['foto_capa']||''}" placeholder="https://..."></div>
+          ${cfg['logo_url']?`<div style="margin-top:.5rem"><img src="${cfg['logo_url']}" alt="Logo" style="height:50px;border-radius:.4rem;border:1px solid var(--border)"></div>`:''}
         </div>
       </div>
       <div>
@@ -3639,10 +3649,113 @@ async function renderConfiguracoes(el) {
   },100);
 }
 
+
+// ══════════════════════════════════════════════════════════
+// FASE 3.2 — SERVIÇOS PÚBLICOS (vitrine no App3)
+// ══════════════════════════════════════════════════════════
+async function renderServicosPublicos(el) {
+  document.getElementById('topbar-actions').innerHTML =
+    `<button class="btn btn-primary" onclick="abrirFormServico()">+ Novo Serviço</button>`;
+
+  const {data:lista} = await getSB()
+    .from('servicos_publicos')
+    .select('*')
+    .order('ordem');
+
+  el.innerHTML = `
+    <div class="alert alert-info" style="margin-bottom:1rem">
+      Estes serviços aparecem na vitrine pública do App 3 com faixa de preço, tempo médio e botão de WhatsApp.
+    </div>
+    <div class="card"><div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>Ordem</th><th>Serviço</th><th>Descrição</th><th>Preço</th><th>Tempo Médio</th><th>Ativo</th><th></th></tr></thead>
+      <tbody>
+        ${(lista||[]).length===0
+          ? `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:2rem">Nenhum serviço cadastrado. Clique em "+ Novo Serviço" para começar.</td></tr>`
+          : (lista||[]).map(s => `<tr>
+              <td>${s.ordem||0}</td>
+              <td><strong>${s.nome}</strong></td>
+              <td style="font-size:.82rem;color:var(--muted);max-width:180px">${s.descricao||'—'}</td>
+              <td>${s.preco_de?`A partir de ${brl(s.preco_de)}`+(s.preco_ate?` até ${brl(s.preco_ate)}`:''):'—'}</td>
+              <td>${s.tempo_medio_min?(s.tempo_medio_min>=60?Math.floor(s.tempo_medio_min/60)+'h'+(s.tempo_medio_min%60?s.tempo_medio_min%60+'min':''):s.tempo_medio_min+'min'):'—'}</td>
+              <td><span class="badge ${s.ativo?'b-ativo':'b-inativo'}">${s.ativo?'Sim':'Não'}</span></td>
+              <td style="display:flex;gap:.35rem">
+                <button class="btn btn-secondary btn-sm" onclick="abrirFormServico('${s.id}')">Editar</button>
+                <button class="btn btn-danger btn-sm" onclick="deletarServico('${s.id}')">Del</button>
+              </td>
+            </tr>`).join('')
+        }
+      </tbody>
+    </table></div></div></div>
+  `;
+}
+
+async function abrirFormServico(id=null) {
+  let s = {};
+  if (id) {
+    const {data} = await getSB().from('servicos_publicos').select('*').eq('id',id).single();
+    s = data||{};
+  }
+  openModal(id?'Editar Serviço':'Novo Serviço','',`
+    <div class="form-row">
+      <div class="form-group"><label class="req">Nome do Serviço</label>
+        <input type="text" id="sv-nome" value="${s.nome||''}" placeholder="Ex: Troca de Óleo"></div>
+      <div class="form-group"><label>Ordem de exibição</label>
+        <input type="number" id="sv-ordem" value="${s.ordem||0}" min="0"></div>
+    </div>
+    <div class="form-group"><label>Descrição curta</label>
+      <input type="text" id="sv-desc" value="${s.descricao||''}" placeholder="Ex: Troca com filtro incluído, qualquer viscosidade"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Preço a partir de (R$)</label>
+        <input type="number" id="sv-de" value="${s.preco_de||''}" step="0.01" placeholder="0"></div>
+      <div class="form-group"><label>Preço até (R$)</label>
+        <input type="number" id="sv-ate" value="${s.preco_ate||''}" step="0.01" placeholder="Opcional"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Tempo médio (minutos)</label>
+        <input type="number" id="sv-tempo" value="${s.tempo_medio_min||''}" placeholder="Ex: 40"></div>
+      <div class="form-group"><label>Ativo no portal</label>
+        <select id="sv-ativo">
+          <option value="true" ${s.ativo!==false?'selected':''}>Sim — aparece no App 3</option>
+          <option value="false" ${s.ativo===false?'selected':''}>Não — oculto</option>
+        </select>
+      </div>
+    </div>
+  `,`<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" onclick="salvarServico(${id?`'${id}'`:'null'})">Salvar</button>`);
+}
+
+async function salvarServico(id) {
+  const nome = document.getElementById('sv-nome').value.trim();
+  if (!nome) { toast('Nome é obrigatório','error'); return; }
+  const dados = {
+    nome,
+    descricao:       document.getElementById('sv-desc').value.trim()||null,
+    preco_de:        parseFloat(document.getElementById('sv-de').value)||null,
+    preco_ate:       parseFloat(document.getElementById('sv-ate').value)||null,
+    tempo_medio_min: parseInt(document.getElementById('sv-tempo').value)||null,
+    ativo:           document.getElementById('sv-ativo').value === 'true',
+    ordem:           parseInt(document.getElementById('sv-ordem').value)||0,
+  };
+  const sb = getSB();
+  let error;
+  if (id) { ({error}=await sb.from('servicos_publicos').update(dados).eq('id',id)); }
+  else    { ({error}=await sb.from('servicos_publicos').insert(dados)); }
+  if (error) { toast('Erro: '+error.message,'error'); return; }
+  toast('Serviço salvo!'); closeModal(); App.navigate('servicos_pub');
+}
+
+async function deletarServico(id) {
+  if (!confirm('Remover este serviço da vitrine?')) return;
+  await getSB().from('servicos_publicos').delete().eq('id',id);
+  toast('Removido','info'); App.navigate('servicos_pub');
+}
+
 async function salvarConfig() {
   const campos=[
     ['nome_mecanica','cfg-nome'],['cnpj_mecanica','cfg-cnpj'],['telefone_mecanica','cfg-tel'],
-    ['email_mecanica','cfg-email'],['endereco_mecanica','cfg-end'],['logo_url','cfg-logo']
+    ['email_mecanica','cfg-email'],['endereco_mecanica','cfg-end'],['logo_url','cfg-logo'],
+    ['maps_link','cfg-maps'],['instagram','cfg-ig'],['horario_funcionamento','cfg-horario'],
+    ['foto_capa','cfg-capa']
   ];
   const sb=getSB();
   for (const [chave,eid] of campos) {
