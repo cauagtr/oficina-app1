@@ -342,7 +342,7 @@ tbody tr { cursor: pointer; }
     <label>Senha</label>
     <input type="password" id="auth-pass" placeholder="••••••••" autocomplete="current-password">
     <div id="auth-error" style="display:none;margin-top:.75rem;padding:.6rem .85rem;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);border-radius:.5rem;color:#fca5a5;font-size:.82rem;font-weight:600"></div>
-    <button class="btn-login" id="btn-login">Entrar</button>
+    <button class="btn-login" id="btn-login" onclick="doLogin()">Entrar</button>
   </div>
 </div>
 
@@ -4291,9 +4291,7 @@ function confirmAcao(msg, onConfirm, titulo='Confirmar ação') {
 
 window.addEventListener('load', function() {
   initAuth();
-  var btn = document.getElementById('btn-login');
   var passInp = document.getElementById('auth-pass');
-  if (btn) btn.addEventListener('click', doLogin);
   if (passInp) passInp.addEventListener('keydown', function(e){ if(e.key==='Enter') doLogin(); });
 });
 </script>
