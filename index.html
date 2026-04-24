@@ -2397,7 +2397,7 @@ async function abrirFormFornecedor(id=null) {
       <div class="form-group"><label class="req">E-mail</label><input type="email" id="ff-email" value="${f.email||''}"></div>
       <div class="form-group"><label class="req">Categoria</label>
         <select id="ff-cat">
-          ${CATS_FORN.map(c=>\`<option value="\${c}" \${f.categoria===c?'selected':''}>\${c}</option>\`).join('')}
+          ${CATS_FORN.map(c=>'<option value="'+c+'" '+(f.categoria===c?'selected':'')+'>'+c+'</option>').join('')}
         </select>
       </div>
     </div>
