@@ -2264,10 +2264,10 @@ async function abrirEntradaEstoque() {
     </div>
     <div class="form-group"><label class="req">Data</label><input type="date" id="ee-data" value="${isoHoje()}"></div>
     <div class="form-group">
-      <label>Nota Fiscal (foto ou PDF)</label>
+      <label class="req">Nota Fiscal (foto ou PDF)</label>
       <input type="file" id="ee-nf" accept="image/*,application/pdf"
         style="padding:.5rem;border:1.5px dashed var(--border);border-radius:.5rem;width:100%;cursor:pointer;background:var(--bg)">
-      <div style="font-size:.72rem;color:var(--muted);margin-top:.3rem">JPG, PNG ou PDF · max 5MB</div>
+      <div style="font-size:.72rem;color:var(--muted);margin-top:.3rem">JPG, PNG ou PDF · max 5MB · <strong>obrigatório</strong></div>
     </div>
     <div class="form-group"><label>Observações</label><input type="text" id="ee-obs" placeholder="Fornecedor, número da NF..."></div>
   `,`<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
@@ -2299,6 +2299,7 @@ async function registrarEntradaEstoque() {
   if (qtd<=0)   { toast('Quantidade inválida','error'); return; }
   if (!custo)   { toast('Valor de custo é obrigatório','error'); return; }
   if (!data)    { toast('Data é obrigatória','error'); return; }
+  if (!nfInput?.files?.[0]) { toast('Nota Fiscal é obrigatória','error'); return; }
 
   // Converter NF para base64 se houver arquivo
   let nfBase64 = null, nfNome = null, nfTipo = null;
@@ -2542,8 +2543,24 @@ async function renderFuncionarios(el) {
         </div>`).join('')}
     </div>
   `;
+  // Calcular valor a pagar para cada funcionário
+  const iniMes = isoHoje().substring(0,7)+'-01';
+  for (const f of (lista||[])) {
+    try {
+      const {data:pts} = await getSB().from('ponto').select('horas_trabalhadas').eq('funcionario_id',f.id).gte('data',iniMes);
+      const totalH   = (pts||[]).reduce((s,p)=>s+Number(p.horas_trabalhadas||0),0);
+      const valPagar = totalH * Number(f.valor_hora||0);
+      const elCard   = document.getElementById('val-pago-'+f.id);
+      if (elCard) {
+        const valDiv = elCard.querySelector('div:last-child');
+        if (valDiv) valDiv.textContent = brl(valPagar) + ' (' + totalH.toFixed(1) + 'h)';
+      }
+    } catch(e) {
+      const elCard = document.getElementById('val-pago-'+f.id);
+      if (elCard) { const d = elCard.querySelector('div:last-child'); if(d) d.textContent = 'R$ 0,00 (0h)'; }
+    }
+  }
 }
-
 
 async function deletarFuncionario(id, nome) {
   openModal('Excluir Funcionário', 'Esta ação é irreversível', `
@@ -3556,7 +3573,7 @@ async function salvarCheckJur(chave, valor) {
 async function renderFinanceiro(el) {
   el.innerHTML = `
     <div class="tabs">
-      ${[['entradas','Entradas'],['saidas','Saídas'],['pagar','A Pagar'],['receber','A Receber'],['fluxo','Fluxo de Caixa'],['margem','Margem OS'],['ofx','Conciliação'],['notas','Notas Fiscais'],['produtividade','Produtividade'],['contador','Contador']].map(([k,l])=>
+      ${[['entradas','Entradas'],['saidas','Saídas'],['pagar','A Pagar'],['receber','A Receber'],['fluxo','Fluxo de Caixa'],['margem','Margem OS'],['ofx','Conciliação'],['notas','Notas Fiscais'],['contador','Contador']].map(([k,l])=>
         `<button class="tab ${_finTab===k?'active':''}" onclick="switchFinTab('${k}')">${l}</button>`
       ).join('')}
     </div>
@@ -3568,7 +3585,7 @@ async function renderFinanceiro(el) {
 function switchFinTab(tab) {
   _finTab = tab;
   document.querySelectorAll('.tabs .tab').forEach((t,i)=>{
-    const tabKeys=['entradas','saidas','pagar','receber','fluxo','margem','ofx','notas','produtividade','contador'];
+    const tabKeys=['entradas','saidas','pagar','receber','fluxo','margem','ofx','notas','contador'];
     t.classList.toggle('active',tabKeys[i]===tab);
   });
   renderFinTab(tab);
@@ -3865,8 +3882,8 @@ async function renderFluxoCaixa(el) {
 function renderOFX(el) {
   document.getElementById('topbar-actions').innerHTML='';
   el.innerHTML=`<div class="card"><div class="card-header"><div class="card-title">Importar Extrato OFX</div></div><div class="card-body">
-    <div class="alert alert-info">Importe seu extrato .OFX para conciliar pagamentos com as entradas e saídas cadastradas.</div>
-    <div class="form-group"><label>Arquivo OFX</label><input type="file" accept=".ofx,.OFX" id="ofx-file" onchange="carregarOFX(this)"></div>
+    <div class="alert alert-info">Importe seu extrato bancário para conciliar pagamentos com as entradas e saídas cadastradas. Formatos aceitos: OFX, QFX, OFC e TXT.</div>
+    <div class="form-group"><label>Arquivo de Extrato</label><input type="file" accept=".ofx,.OFX,.qfx,.QFX,.ofc,.OFC,.txt,.TXT" id="ofx-file" onchange="carregarOFX(this)"></div>
     <div id="ofx-resultado"></div>
   </div></div>`;
 }
