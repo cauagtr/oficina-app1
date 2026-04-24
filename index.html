@@ -3904,7 +3904,7 @@ async function deletarServico(id) {
   if (!confirm('Remover este serviço da vitrine?')) return;
   await getSB().from('servicos_publicos').delete().eq('id',id);
   toast('Removido','info'); App.navigate('servicos_pub');
-}
+} 
 
 async function salvarConfig() {
   const campos=[
