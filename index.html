@@ -379,7 +379,7 @@ tbody tr { cursor: pointer; }
       <div class="nav-section">Operacional</div>
       <div class="nav-item" data-page="pedido_compra"   onclick="App.navigate('pedido_compra')"><span class="nav-icon">🛒</span> Pedido de Compra</div>
       <div class="nav-item" data-page="relat_contador"  onclick="App.navigate('relat_contador')"><span class="nav-icon">📁</span> Rel. Contador</div>
-      <div class="nav-item" data-page="reclamacoes"     onclick="App.navigate('reclamacoes')"><span class="nav-icon">⚠️</span> Reclamações</div>
+
       <div class="nav-item" data-page="conformidade"    onclick="App.navigate('conformidade')"><span class="nav-icon">⚖️</span> Conformidade</div>
       <div class="nav-item" data-page="servicos_pub"    onclick="App.navigate('servicos_pub')"><span class="nav-icon">🛎️</span> Serviços Públicos</div>
       <div class="nav-section">Sistema</div>
@@ -589,7 +589,7 @@ const PAGES = {
   produtividade:{ title:'Produtividade',       sub:'Desempenho da equipe',        render: renderProdutividade },
   pedido_compra:{ title:'Pedido de Compra',    sub:'Reposição de estoque',        render: renderPedidoCompra  },
   relat_contador:{title:'Rel. Contador',       sub:'Exportar para contador',      render: renderRelatorioContador},
-  reclamacoes:  { title:'Reclamações',         sub:'Gestão de garantias',         render: renderReclamacoes   },
+
   conformidade: { title:'Conformidade',        sub:'Checklist jurídico',          render: renderChecklistJuridico},
   financeiro:   { title:'Financeiro',         sub:'Receitas, despesas e fluxo', render: renderFinanceiro   },
   relatorios:   { title:'Relatórios',         sub:'Análises exportáveis',       render: renderRelatorios   },
@@ -1837,9 +1837,10 @@ async function salvarPreventivo(id) {
 }
 
 async function deletarPreventivo(id) {
-  if (!confirm('Remover?')) return;
-  await getSB().from('plano_preventivo').delete().eq('id',id);
-  toast('Removido','info'); App.navigate('preventivo');
+  confirmAcao('Remover este item do plano preventivo?', async ()=>{
+    await getSB().from('plano_preventivo').delete().eq('id',id);
+    toast('Removido','info'); App.navigate('preventivo');
+  });
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1998,7 +1999,7 @@ async function salvarCatalogo(id) {
 }
 
 async function deletarCatalogo(id) {
-  if (!confirm('Remover este benefício?')) return;
+  /* confirm substituído */
   await getSB().from('recompensas_catalogo').delete().eq('id',id);
   toast('Removido','info'); App.navigate('recompensas');
 }
@@ -2094,7 +2095,7 @@ async function salvarRecompensa(id) {
   toast('Salvo!'); closeModal(); App.navigate('recompensas');
 }
 async function deletarRecompensa(id) {
-  if (!confirm('Remover?')) return;
+  /* confirm substituído */
   await getSB().from('programa_recompensas').delete().eq('id',id);
   toast('Removido','info'); App.navigate('recompensas');
 }
@@ -2109,7 +2110,7 @@ async function renderEstoque(el) {
     <button class="btn btn-primary" style="background:var(--orange,#f97316);border-color:var(--orange,#f97316)" onclick="abrirEntradaEstoque()">+ Registrar Entrada</button>
     <button class="btn btn-primary" onclick="abrirFormEstoque()">+ Novo Produto</button>`;
 
-  const {data:lista} = await getSB().from('estoque').select('*,fornecedores(nome_fantasia,razao_social)').order('nome');
+  const {data:lista} = await getSB().from('estoque').select('*,fornecedores(nome_fantasia,razao_social,telefone)').order('nome');
   const filtrada = _estSearch ? (lista||[]).filter(p=>p.nome?.toLowerCase().includes(_estSearch)||p.codigo?.toLowerCase().includes(_estSearch)||p.categoria?.toLowerCase().includes(_estSearch)) : (lista||[]);
   const alertas  = (lista||[]).filter(p=>Number(p.quantidade)<=Number(p.quantidade_minima));
 
@@ -2139,7 +2140,11 @@ async function renderEstoque(el) {
               <td>${brl(p.valor_custo)}</td>
               <td>${brl(p.valor_venda)}</td>
               <td>${p.fornecedores?.nome_fantasia||p.fornecedores?.razao_social||'—'}</td>
-              <td><button class="btn btn-secondary btn-sm" onclick="abrirFormEstoque('${p.id}')">Editar</button></td>
+              <td style="display:flex;gap:.3rem;align-items:center">
+                ${(()=>{const tel=(p.fornecedores?.telefone||'').replace(/\D/g,'');const msg=`Olá! Preciso de informações sobre o produto ${p.nome}. Pode me ajudar?`;return tel?`<a class="btn btn-whatsapp btn-sm" href="https://wa.me/55${tel}?text=${encodeURIComponent(msg)}" target="_blank" title="WhatsApp do fornecedor">WA</a>`:''})()}
+                <button class="btn btn-secondary btn-sm" onclick="abrirFormEstoque('${p.id}')">Editar</button>
+                <button class="btn btn-danger btn-sm" onclick="confirmAcao('Remover o produto <strong>${p.nome}</strong> do estoque? Esta ação não pode ser desfeita.',()=>deletarProdutoEstoque('${p.id}'))">Del</button>
+              </td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -2269,6 +2274,12 @@ async function abrirEntradaEstoque() {
      <button class="btn btn-primary" onclick="registrarEntradaEstoque()">Registrar Entrada</button>`);
 }
 
+
+async function deletarProdutoEstoque(id) {
+  await getSB().from('estoque').delete().eq('id',id);
+  toast('Produto removido','info'); App.navigate('estoque');
+}
+
 function filtrarProdutoEntrada(val) {
   const dl = document.getElementById('ee-prod-list');
   if (!dl) return;
@@ -2372,6 +2383,7 @@ async function renderFornecedores(el) {
 async function abrirFormFornecedor(id=null) {
   let f={};
   if (id) { const {data}=await getSB().from('fornecedores').select('*').eq('id',id).single(); f=data||{}; }
+  const CATS_FORN = ['Peças','Óleo e Lubrificantes','Pneus','Filtros','Freios','Elétrica','Ferramentas','Uniformes','EPI','Limpeza','Outros'];
   openModal(id?'Editar Fornecedor':'Novo Fornecedor','',`
     <div class="form-row">
       <div class="form-group"><label class="req">Razão Social</label><input type="text" id="ff-razao" value="${f.razao_social||''}"></div>
@@ -2379,19 +2391,42 @@ async function abrirFormFornecedor(id=null) {
     </div>
     <div class="form-row">
       <div class="form-group"><label class="req">CNPJ</label><input type="text" id="ff-cnpj" value="${f.cnpj||''}" placeholder="00.000.000/0000-00" maxlength="18"></div>
-      <div class="form-group"><label class="req">Telefone</label><input type="text" id="ff-tel" value="${f.telefone||''}" maxlength="15"></div>
+      <div class="form-group"><label class="req">Telefone / WhatsApp</label><input type="text" id="ff-tel" value="${f.telefone||''}" maxlength="15"></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="req">E-mail</label><input type="email" id="ff-email" value="${f.email||''}"></div>
-      <div class="form-group"><label class="req">Categoria</label><input type="text" id="ff-cat" value="${f.categoria||''}" placeholder="Peças, Óleo, Pneus..."></div>
+      <div class="form-group"><label class="req">Categoria</label>
+        <select id="ff-cat">
+          ${CATS_FORN.map(c=>\`<option value="\${c}" \${f.categoria===c?'selected':''}>\${c}</option>\`).join('')}
+        </select>
+      </div>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="req">Nome do Contato</label><input type="text" id="ff-contato" value="${f.contato_nome||''}"></div>
-      <div class="form-group"><label class="req">Endereço</label><input type="text" id="ff-end" value="${f.endereco||''}"></div>
+      <div class="form-group"><label class="req">CEP</label>
+        <div style="display:flex;gap:.4rem">
+          <input type="text" id="ff-cep" value="${f.cep||''}" placeholder="00000-000" maxlength="9" style="flex:1"
+            oninput="this.value=this.value.replace(/\D/g,'').replace(/(\d{5})(\d)/,'$1-$2').substring(0,9)"
+            onblur="buscarCEP(this.value)">
+          <button class="btn btn-secondary btn-sm" type="button" onclick="buscarCEP(document.getElementById('ff-cep').value)" style="white-space:nowrap">Buscar</button>
+        </div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:2"><label class="req">Rua / Logradouro</label><input type="text" id="ff-rua" value="${f.rua||''}" placeholder="Rua, Av., Travessa..."></div>
+      <div class="form-group" style="flex:1"><label class="req">Número</label><input type="text" id="ff-numero" value="${f.numero||''}" placeholder="123"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Complemento</label><input type="text" id="ff-compl" value="${f.complemento||''}" placeholder="Sala, Andar..."></div>
+      <div class="form-group"><label class="req">Bairro</label><input type="text" id="ff-bairro" value="${f.bairro||''}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="req">Cidade</label><input type="text" id="ff-cidade" value="${f.cidade||''}"></div>
+      <div class="form-group"><label class="req">Estado (UF)</label><input type="text" id="ff-uf" value="${f.uf||''}" maxlength="2" style="text-transform:uppercase"></div>
     </div>
     <div class="form-group"><label>Observações</label><textarea id="ff-obs">${f.observacoes||''}</textarea></div>
   `,`<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-     <button class="btn btn-primary" onclick="salvarFornecedor(${id?`'${id}'`:'null'})">Salvar</button>`);
+     <button class="btn btn-primary" onclick="salvarFornecedor(${id?`'${id}'`:'null'})">Salvar</button>`, true);
 
   setTimeout(()=>{
     const c=document.getElementById('ff-cnpj'); if(c) applyMask(c,maskCNPJ);
@@ -2399,11 +2434,37 @@ async function abrirFormFornecedor(id=null) {
   },100);
 }
 
+
+async function buscarCEP(cep) {
+  const c = cep.replace(/\D/g,'');
+  if (c.length !== 8) return;
+  try {
+    const r = await fetch(`https://viacep.com.br/ws/${c}/json/`);
+    const d = await r.json();
+    if (d.erro) { toast('CEP não encontrado','error'); return; }
+    const set = (id, val) => { const el = document.getElementById(id); if(el) el.value = val||''; };
+    set('ff-rua',    d.logradouro);
+    set('ff-bairro', d.bairro);
+    set('ff-cidade', d.localidade);
+    set('ff-uf',     d.uf);
+    toast('Endereço preenchido!','success');
+    document.getElementById('ff-numero')?.focus();
+  } catch(e) { toast('Erro ao buscar CEP','error'); }
+}
+
 async function salvarFornecedor(id) {
-  const req = [['ff-razao','Razão Social'],['ff-fantasia','Nome Fantasia'],['ff-cnpj','CNPJ'],['ff-tel','Telefone'],['ff-email','E-mail'],['ff-cat','Categoria'],['ff-contato','Contato'],['ff-end','Endereço']];
+  const req = [['ff-razao','Razão Social'],['ff-fantasia','Nome Fantasia'],['ff-cnpj','CNPJ'],['ff-tel','Telefone'],['ff-email','E-mail'],['ff-cat','Categoria'],['ff-contato','Contato'],['ff-rua','Rua'],['ff-numero','Número'],['ff-bairro','Bairro'],['ff-cidade','Cidade'],['ff-uf','Estado']];
   for (const [eid,lbl] of req) {
     if (!document.getElementById(eid)?.value?.trim()) { toast(`${lbl} é obrigatório`,'error'); return; }
   }
+  const rua    = document.getElementById('ff-rua').value.trim();
+  const numero = document.getElementById('ff-numero').value.trim();
+  const compl  = document.getElementById('ff-compl').value.trim();
+  const bairro = document.getElementById('ff-bairro').value.trim();
+  const cidade = document.getElementById('ff-cidade').value.trim();
+  const uf     = document.getElementById('ff-uf').value.trim().toUpperCase();
+  const cep    = document.getElementById('ff-cep').value.trim();
+  const endFull= `${rua}, ${numero}${compl?', '+compl:''} — ${bairro}, ${cidade}/${uf} — CEP ${cep}`;
   const dados = {
     razao_social: document.getElementById('ff-razao').value.trim(),
     nome_fantasia:document.getElementById('ff-fantasia').value.trim(),
@@ -2412,7 +2473,8 @@ async function salvarFornecedor(id) {
     email:        document.getElementById('ff-email').value.trim(),
     categoria:    document.getElementById('ff-cat').value.trim(),
     contato_nome: document.getElementById('ff-contato').value.trim(),
-    endereco:     document.getElementById('ff-end').value.trim(),
+    endereco:     endFull,
+    cep, rua, numero, complemento: compl, bairro, cidade, uf,
     observacoes:  document.getElementById('ff-obs').value.trim(),
   };
   let error;
@@ -2422,9 +2484,10 @@ async function salvarFornecedor(id) {
   toast('Salvo!'); closeModal(); App.navigate('fornecedores');
 }
 async function deletarFornecedor(id) {
-  if (!confirm('Remover?')) return;
-  await getSB().from('fornecedores').delete().eq('id',id);
-  toast('Removido','info'); App.navigate('fornecedores');
+  confirmAcao('Remover este fornecedor? Esta ação não pode ser desfeita.', async ()=>{
+    await getSB().from('fornecedores').delete().eq('id',id);
+    toast('Fornecedor removido','info'); App.navigate('fornecedores');
+  });
 }
 
 // ══════════════════════════════════════════════════════════
@@ -2438,31 +2501,73 @@ async function renderFuncionarios(el) {
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.9rem">
       ${(lista||[]).length===0?'<p style="color:var(--muted)">Nenhum funcionário.</p>'
       :(lista||[]).map(f=>`
-        <div class="card" style="padding:1.1rem">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.7rem">
+        <div class="card" style="padding:1.1rem" id="card-func-${f.id}">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.75rem">
             <div>
               <div style="font-weight:800;font-size:.95rem;letter-spacing:-.02em">${f.nome}</div>
-              <div style="font-size:.78rem;color:var(--muted);margin-top:.1rem">${f.cargo||'—'}</div>
+              <div style="font-size:.75rem;color:var(--muted);margin-top:.1rem">${f.cargo||'—'} · ${f.percentual_comissao||0}% comissão</div>
             </div>
             <span class="badge b-${f.status==='ativo'?'ativo':'inativo'}">${f.status||'ativo'}</span>
           </div>
-          <div style="background:var(--bg);border-radius:.5rem;padding:.65rem .8rem;margin-bottom:.7rem">
-            <div style="font-size:.7rem;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:.3rem">Chave Pix</div>
-            <div style="font-weight:700;font-size:.88rem;word-break:break-all">${f.pix||'—'}</div>
+          <div style="background:var(--bg);border-radius:.55rem;padding:.7rem .85rem;margin-bottom:.75rem;border:1px solid var(--border)">
+            <div style="font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.25rem">Chave Pix</div>
+            <div style="font-weight:700;font-size:.88rem;word-break:break-all;color:${f.pix?'var(--text)':'var(--muted)'}">${f.pix||'Não cadastrado'}</div>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem;font-size:.78rem;color:var(--muted);margin-bottom:.7rem">
-            <div><span style="font-weight:600">R$/h:</span> ${brl(f.valor_hora)}</div>
-            <div><span style="font-weight:600">Tel:</span> ${f.telefone||'—'}</div>
-            <div><span style="font-weight:600">Admissão:</span> ${brData(f.data_admissao)}</div>
-            <div><span style="font-weight:600">E-mail:</span> ${f.email||'—'}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.75rem">
+            <div style="background:var(--bg);border-radius:.45rem;padding:.55rem .7rem">
+              <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Valor/hora</div>
+              <div style="font-weight:700;font-size:.9rem">${brl(f.valor_hora)}</div>
+            </div>
+            <div style="background:var(--bg);border-radius:.45rem;padding:.55rem .7rem">
+              <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Telefone</div>
+              <div style="font-weight:600;font-size:.82rem">${f.telefone||'—'}</div>
+            </div>
+            <div style="background:#d1fae5;border-radius:.45rem;padding:.55rem .7rem" id="val-pago-${f.id}">
+              <div style="font-size:.68rem;color:#065f46;text-transform:uppercase;letter-spacing:.05em">A pagar no mês</div>
+              <div style="font-weight:700;font-size:.9rem;color:#065f46">Calculando...</div>
+            </div>
+            <div style="background:var(--bg);border-radius:.45rem;padding:.55rem .7rem">
+              <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Admissão</div>
+              <div style="font-weight:600;font-size:.82rem">${brData(f.data_admissao)}</div>
+            </div>
           </div>
-          <div style="display:flex;gap:.5rem">
+          <div style="font-size:.75rem;color:var(--muted);margin-bottom:.65rem;word-break:break-all">
+            <strong>E-mail:</strong> ${f.email||'—'}
+          </div>
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap">
             <button class="btn btn-secondary btn-sm" onclick="abrirFormFunc('${f.id}')">Editar</button>
             <button class="btn btn-primary btn-sm" onclick="abrirPonto('${f.id}','${f.nome.replace(/'/g,"\\'")}')">Ponto</button>
+            <button class="btn btn-danger btn-sm" onclick="deletarFuncionario('${f.id}','${f.nome.replace(/'/g,"\\'")}')">Excluir</button>
           </div>
         </div>`).join('')}
     </div>
   `;
+}
+
+
+async function deletarFuncionario(id, nome) {
+  openModal('Excluir Funcionário', 'Esta ação é irreversível', `
+    <div style="text-align:center;padding:.5rem 0">
+      <div style="font-size:2.5rem;margin-bottom:.75rem">⚠️</div>
+      <p style="font-size:.95rem;margin-bottom:.75rem">Você está prestes a excluir o funcionário <strong>${nome}</strong>.</p>
+      <p style="font-size:.85rem;color:var(--red);margin-bottom:1rem">Esta ação <strong>não pode ser desfeita</strong>. Todos os registros de ponto deste funcionário também serão perdidos.</p>
+      <div class="form-group">
+        <label>Para confirmar, digite o nome do funcionário:</label>
+        <input type="text" id="conf-nome-func" placeholder="${nome}" style="text-align:center">
+      </div>
+    </div>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-danger" onclick="confirmarExclusaoFuncionario('${id}','${nome.replace(/'/g,"\'")}')">Excluir Definitivamente</button>
+  `);
+}
+
+async function confirmarExclusaoFuncionario(id, nome) {
+  const digitado = document.getElementById('conf-nome-func')?.value?.trim();
+  if (digitado !== nome) { toast('Nome incorreto. Digite exatamente: '+nome,'error'); return; }
+  await getSB().from('ponto').delete().eq('funcionario_id',id);
+  await getSB().from('funcionarios').delete().eq('id',id);
+  toast('Funcionário excluído','info'); closeModal(); App.navigate('funcionarios');
 }
 
 async function abrirFormFunc(id=null) {
@@ -2557,18 +2662,77 @@ async function abrirPonto(funcId, nome) {
       <div class="form-group"><label>Saída</label><input type="time" id="pt-saida"></div>
     </div>
     <div class="form-group"><label>Observações</label><input type="text" id="pt-obs" placeholder="Hora extra, falta..."></div>
-    <div class="form-section">Histórico do Mês</div>
+    <div class="form-section" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Histórico do Mês</span>
+      <span style="font-size:.78rem;color:var(--muted)">${(pontos||[]).length} registro(s)</span>
+    </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Data</th><th>Entrada</th><th>Saída</th><th>Horas</th></tr></thead>
-      <tbody>${(pontos||[]).map(p=>`<tr>
-        <td>${brData(p.data)}</td>
-        <td>${p.entrada?new Date(p.entrada).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'—'}</td>
-        <td>${p.saida?new Date(p.saida).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'—'}</td>
-        <td>${Number(p.horas_trabalhadas||0).toFixed(1)}h</td>
-      </tr>`).join('')}</tbody>
+      <thead><tr><th>Data</th><th>Entrada</th><th>Saída</th><th>Horas</th><th></th></tr></thead>
+      <tbody>${(pontos||[]).map(p=>{
+        const ent = p.entrada?new Date(p.entrada).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'—';
+        const sai = p.saida?new Date(p.saida).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'—';
+        const hStr = Number(p.horas_trabalhadas||0).toFixed(1)+'h';
+        return `<tr>
+          <td>${brData(p.data)}</td>
+          <td>${ent}</td>
+          <td>${sai}</td>
+          <td><strong>${hStr}</strong></td>
+          <td style="display:flex;gap:.25rem">
+            <button class="btn btn-secondary btn-sm" onclick="editarPonto('${p.id}','${funcId}')">✏</button>
+            <button class="btn btn-danger btn-sm" onclick="confirmAcao('Remover este registro de ponto?',()=>removerPonto('${p.id}','${funcId}','${nome.replace(/'/g,"\'")}'))">✕</button>
+          </td>
+        </tr>`;
+      }).join('')}</tbody>
     </table></div>
   `,`<button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
      <button class="btn btn-primary" onclick="registrarPonto('${funcId}')">Registrar</button>`, true);
+}
+
+
+function editarPonto(pontoId, funcId) {
+  getSB().from('ponto').select('*').eq('id',pontoId).single().then(({data:p})=>{
+    if(!p) return;
+    const ent = p.entrada?new Date(p.entrada).toTimeString().substring(0,5):'';
+    const sai = p.saida?new Date(p.saida).toTimeString().substring(0,5):'';
+    openModal('Editar Registro de Ponto','',`
+      <div class="form-row">
+        <div class="form-group"><label>Data</label><input type="date" id="ep-data" value="${p.data}"></div>
+        <div class="form-group"><label>Entrada</label><input type="time" id="ep-entrada" value="${ent}"></div>
+        <div class="form-group"><label>Saída</label><input type="time" id="ep-saida" value="${sai}"></div>
+      </div>
+      <div class="form-group"><label>Observações</label><input type="text" id="ep-obs" value="${p.observacoes||''}"></div>
+    `,`<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+       <button class="btn btn-primary" onclick="salvarEdicaoPonto('${pontoId}','${funcId}')">Salvar</button>`);
+  });
+}
+
+async function salvarEdicaoPonto(pontoId, funcId) {
+  const data    = document.getElementById('ep-data').value;
+  const entrada = document.getElementById('ep-entrada').value;
+  const saida   = document.getElementById('ep-saida').value;
+  const obs     = document.getElementById('ep-obs').value;
+  let horas = 0;
+  if (entrada && saida) {
+    const [eh,em] = entrada.split(':'); const [sh,sm] = saida.split(':');
+    horas = ((+sh*60+ +sm)-(+eh*60+ +em))/60;
+  }
+  await getSB().from('ponto').update({
+    data, horas_trabalhadas: Math.max(0,horas),
+    entrada: data+'T'+entrada+':00',
+    saida:   saida ? data+'T'+saida+':00' : null,
+    observacoes: obs
+  }).eq('id',pontoId);
+  toast('Registro atualizado!');
+  closeModal();
+  // reabrir modal de ponto
+  const {data:f} = await getSB().from('funcionarios').select('nome').eq('id',funcId).single();
+  if(f) abrirPonto(funcId, f.nome);
+}
+
+async function removerPonto(pontoId, funcId, nome) {
+  await getSB().from('ponto').delete().eq('id',pontoId);
+  toast('Registro removido','info');
+  abrirPonto(funcId, nome);
 }
 
 async function registrarPonto(funcId) {
@@ -3024,10 +3188,19 @@ async function renderRelatorioContador(el) {
       <p style="font-size:.85rem;color:var(--muted);margin-bottom:1rem">
         Gera um pacote completo com receitas, despesas e notas fiscais do período para entrega ao contador.
       </p>
-      <div style="display:flex;gap:.65rem;flex-wrap:wrap">
-        <button class="btn btn-primary" onclick="exportarReceitasCSV('${periodo}')">Receitas (.csv)</button>
-        <button class="btn btn-secondary" onclick="exportarDespesasCSV('${periodo}')">Despesas (.csv)</button>
-        <button class="btn btn-secondary" onclick="exportarNFsPeriodo('${periodo}')">Notas Fiscais do Mês</button>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.65rem">
+        <button class="btn btn-primary" onclick="exportarRelatorioPDF('${periodo}')" style="display:flex;align-items:center;gap:.5rem;justify-content:center">
+          <span>📄</span><div style="text-align:left"><div style="font-weight:700;font-size:.82rem">Relatório Completo</div><div style="font-size:.7rem;opacity:.8">PDF formatado para contador</div></div>
+        </button>
+        <button class="btn btn-secondary" onclick="exportarReceitasCSV('${periodo}')" style="display:flex;align-items:center;gap:.5rem;justify-content:center">
+          <span>📊</span><div style="text-align:left"><div style="font-weight:700;font-size:.82rem">Receitas</div><div style="font-size:.7rem;opacity:.7">Planilha CSV</div></div>
+        </button>
+        <button class="btn btn-secondary" onclick="exportarDespesasCSV('${periodo}')" style="display:flex;align-items:center;gap:.5rem;justify-content:center">
+          <span>📊</span><div style="text-align:left"><div style="font-weight:700;font-size:.82rem">Despesas</div><div style="font-size:.7rem;opacity:.7">Planilha CSV</div></div>
+        </button>
+        <button class="btn btn-secondary" onclick="exportarNFsZip('${periodo}')" style="display:flex;align-items:center;gap:.5rem;justify-content:center">
+          <span>🗂️</span><div style="text-align:left"><div style="font-weight:700;font-size:.82rem">Notas Fiscais</div><div style="font-size:.7rem;opacity:.7">ZIP do período</div></div>
+        </button>
       </div>
     </div>
     <div id="cont-preview"><div class="loading-wrap"><div class="spinner"></div>Carregando resumo...</div></div>
@@ -3056,6 +3229,116 @@ async function renderRelatorioContador(el) {
       Clique nos botões acima para baixar cada arquivo. Para entregar ao contador: <strong>Receitas.csv + Despesas.csv + Notas Fiscais do mês</strong>.
     </div>
   `;
+}
+
+
+async function exportarRelatorioPDF(periodo) {
+  const ini=periodo+'-01', fim=periodo+'-31';
+  const sb=getSB();
+  const [{data:entradas},{data:saidas},{data:nfs},{data:os}] = await Promise.all([
+    sb.from('financeiro_entradas').select('*').eq('status','recebido').gte('data_recebimento',ini).lte('data_recebimento',fim).order('data_recebimento'),
+    sb.from('financeiro_saidas').select('*').eq('status','pago').gte('data_pagamento',ini).lte('data_pagamento',fim).order('data_pagamento'),
+    sb.from('estoque_movimentos').select('produto_nome,quantidade,valor_unitario,data_movimento,nf_nome').eq('tipo','entrada').not('nf_base64','is',null).gte('data_movimento',ini).lte('data_movimento',fim),
+    sb.from('ordens_servico').select('numero,status,valor_total,valor_servicos,data_entrada,clientes(nome)').gte('data_entrada',ini).lte('data_entrada',fim).order('data_entrada')
+  ]);
+  const totEnt=(entradas||[]).reduce((s,r)=>s+Number(r.valor),0);
+  const totSai=(saidas||[]).reduce((s,r)=>s+Number(r.valor),0);
+  const totOS=(os||[]).filter(o=>o.status==='pago').reduce((s,o)=>s+Number(o.valor_total),0);
+  const nomeCfg=_config['nome_mecanica']||'Oficina Pro';
+  const mesLabel=new Date(periodo+'-15').toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF('p','mm','a4');
+  const W=210, M=14;
+  // Header
+  doc.setFillColor(17,24,39); doc.rect(0,0,W,22,'F');
+  doc.setFontSize(16); doc.setFont('helvetica','bold'); doc.setTextColor(245,158,11);
+  doc.text(nomeCfg, M, 14);
+  doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(180,180,180);
+  doc.text('Relatório para Contador — '+mesLabel, M, 20);
+  doc.text('Gerado em: '+brData(isoHoje()), W-M, 20, {align:'right'});
+  doc.setTextColor(0,0,0);
+  let y=32;
+  // Resumo
+  doc.setFontSize(11); doc.setFont('helvetica','bold');
+  doc.text('RESUMO DO PERÍODO', M, y); y+=6;
+  doc.setDrawColor(230,230,230); doc.line(M,y,W-M,y); y+=5;
+  const kpis=[['Receitas do período',brl(totEnt),'009900'],['Despesas do período',brl(totSai),'cc0000'],['Resultado líquido',brl(totEnt-totSai),totEnt-totSai>=0?'009900':'cc0000'],['OS pagas',brl(totOS),'000000'],['NFs registradas',(nfs||[]).length+' notas','000000']];
+  kpis.forEach(([lbl,val,cor])=>{
+    doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(100,100,100); doc.text(lbl, M, y);
+    doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(parseInt(cor.substring(0,2),16),parseInt(cor.substring(2,4),16),parseInt(cor.substring(4,6),16));
+    doc.text(val, W-M, y, {align:'right'}); y+=7;
+  });
+  y+=4;
+  // Receitas
+  if((entradas||[]).length>0){
+    doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+    doc.text('RECEITAS', M, y); y+=5;
+    doc.setDrawColor(230,230,230); doc.line(M,y,W-M,y); y+=4;
+    doc.setFontSize(8); doc.setFont('helvetica','bold'); doc.setTextColor(100,100,100);
+    doc.text('Data', M, y); doc.text('Descrição', M+18, y); doc.text('Categoria', M+90, y); doc.text('Forma Pgto', M+130, y); doc.text('Valor', W-M, y, {align:'right'}); y+=4;
+    doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0);
+    (entradas||[]).forEach(r=>{
+      if(y>270){doc.addPage();y=14;}
+      doc.setFontSize(7.5);
+      doc.text(brData(r.data_recebimento||''), M, y);
+      doc.text((r.descricao||'').substring(0,40), M+18, y);
+      doc.text((r.categoria||'').substring(0,20), M+90, y);
+      doc.text((r.forma_pagamento||'').substring(0,18), M+130, y);
+      doc.setTextColor(0,128,0); doc.text(brl(r.valor), W-M, y, {align:'right'}); doc.setTextColor(0,0,0);
+      y+=5;
+    });
+    y+=3;
+  }
+  // Despesas
+  if((saidas||[]).length>0){
+    if(y>230){doc.addPage();y=14;}
+    doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+    doc.text('DESPESAS', M, y); y+=5;
+    doc.setDrawColor(230,230,230); doc.line(M,y,W-M,y); y+=4;
+    doc.setFontSize(8); doc.setFont('helvetica','bold'); doc.setTextColor(100,100,100);
+    doc.text('Data', M, y); doc.text('Descrição', M+18, y); doc.text('Categoria', M+90, y); doc.text('Valor', W-M, y, {align:'right'}); y+=4;
+    doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0);
+    (saidas||[]).forEach(r=>{
+      if(y>270){doc.addPage();y=14;}
+      doc.setFontSize(7.5);
+      doc.text(brData(r.data_pagamento||''), M, y);
+      doc.text((r.descricao||'').substring(0,50), M+18, y);
+      doc.text((r.categoria||'').substring(0,24), M+90, y);
+      doc.setTextColor(180,0,0); doc.text(brl(r.valor), W-M, y, {align:'right'}); doc.setTextColor(0,0,0);
+      y+=5;
+    });
+    y+=3;
+  }
+  // Footer
+  const totalPages=doc.getNumberOfPages();
+  for(let i=1;i<=totalPages;i++){
+    doc.setPage(i);
+    doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.setTextColor(160,160,160);
+    doc.text(nomeCfg+' — Relatório para Contador — '+mesLabel, M, 292);
+    doc.text('Pág. '+i+'/'+totalPages, W-M, 292, {align:'right'});
+  }
+  const nomeArq='Relatório Contador — '+nomeCfg+' — '+mesLabel+'.pdf';
+  doc.save(nomeArq);
+  toast('PDF gerado: '+nomeArq);
+}
+
+async function exportarNFsZip(periodo) {
+  const ini=periodo+'-01', fim=periodo+'-31';
+  const {data:movs} = await getSB().from('estoque_movimentos').select('*').eq('tipo','entrada').not('nf_base64','is',null).gte('data_movimento',ini).lte('data_movimento',fim);
+  if (!movs||movs.length===0) { toast('Nenhuma NF no período','error'); return; }
+  const nomeCfg = (_config['nome_mecanica']||'Oficina').replace(/[^a-zA-Z0-9 ]/g,'');
+  const dataHoje = isoHoje().split('-').reverse().join('-');
+  toast(`Baixando ${movs.length} nota(s) em sequência...`);
+  for (let i=0;i<movs.length;i++) {
+    const m=movs[i];
+    if(!m.nf_base64) continue;
+    const dataUrl=`data:${m.nf_tipo||'application/octet-stream'};base64,${m.nf_base64}`;
+    const ext = (m.nf_nome||'').split('.').pop()||'pdf';
+    const nomeArq = `Notas Fiscais ${nomeCfg} - ${dataHoje} - (${i+1} de ${movs.length}).${ext}`;
+    const a=document.createElement('a'); a.href=dataUrl; a.download=nomeArq; a.click();
+    await new Promise(r=>setTimeout(r,400));
+  }
+  toast(`${movs.length} nota(s) exportada(s)!`);
 }
 
 async function exportarReceitasCSV(periodo) {
@@ -3273,7 +3556,7 @@ async function salvarCheckJur(chave, valor) {
 async function renderFinanceiro(el) {
   el.innerHTML = `
     <div class="tabs">
-      ${[['entradas','Entradas'],['saidas','Saídas'],['pagar','A Pagar'],['receber','A Receber'],['fluxo','Fluxo de Caixa'],['margem','Margem OS'],['ofx','Conciliação'],['inadimplencia','Inadimplência'],['notas','Notas Fiscais']].map(([k,l])=>
+      ${[['entradas','Entradas'],['saidas','Saídas'],['pagar','A Pagar'],['receber','A Receber'],['fluxo','Fluxo de Caixa'],['margem','Margem OS'],['ofx','Conciliação'],['notas','Notas Fiscais'],['produtividade','Produtividade'],['contador','Contador']].map(([k,l])=>
         `<button class="tab ${_finTab===k?'active':''}" onclick="switchFinTab('${k}')">${l}</button>`
       ).join('')}
     </div>
@@ -3285,7 +3568,7 @@ async function renderFinanceiro(el) {
 function switchFinTab(tab) {
   _finTab = tab;
   document.querySelectorAll('.tabs .tab').forEach((t,i)=>{
-    const tabKeys=['entradas','saidas','pagar','receber','fluxo','margem','ofx','inadimplencia','notas'];
+    const tabKeys=['entradas','saidas','pagar','receber','fluxo','margem','ofx','notas','produtividade','contador'];
     t.classList.toggle('active',tabKeys[i]===tab);
   });
   renderFinTab(tab);
@@ -3300,10 +3583,11 @@ async function renderFinTab(tab) {
   else if (tab==='pagar')   await renderContasPagar(el);
   else if (tab==='receber') await renderContasReceber(el);
   else if (tab==='fluxo')   await renderFluxoCaixa(el);
-  else if (tab==='ofx')     renderOFX(el);
-  else if (tab==='margem')        await renderMargemOS(el);
-  else if (tab==='inadimplencia') await renderInadimplencia(el);
-  else if (tab==='notas')         await renderNotasFiscais(el);
+  else if (tab==='ofx')          renderOFX(el);
+  else if (tab==='margem')       await renderMargemOS(el);
+  else if (tab==='notas')        await renderNotasFiscais(el);
+  else if (tab==='produtividade') await renderProdutividade(el);
+  else if (tab==='contador')     await renderRelatorioContador(el);
 }
 
 async function renderFinEntradas(el) {
@@ -3367,9 +3651,10 @@ async function salvarEntrada() {
 }
 
 async function deletarEntrada(id) {
-  if (!confirm('Remover?')) return;
-  await getSB().from('financeiro_entradas').delete().eq('id',id);
-  toast('Removida','info'); renderFinTab('entradas');
+  confirmAcao('Remover este lançamento de entrada? Esta ação não pode ser desfeita.', async ()=>{
+    await getSB().from('financeiro_entradas').delete().eq('id',id);
+    toast('Removida','info'); renderFinTab('entradas');
+  });
 }
 
 async function renderFinSaidas(el) {
@@ -3471,9 +3756,10 @@ async function confirmarPagamentoSaida(id) {
 }
 
 async function deletarSaida(id) {
-  if (!confirm('Remover?')) return;
-  await getSB().from('financeiro_saidas').delete().eq('id',id);
-  toast('Removida','info'); renderFinTab('saidas');
+  confirmAcao('Remover este lançamento de saída? Esta ação não pode ser desfeita.', async ()=>{
+    await getSB().from('financeiro_saidas').delete().eq('id',id);
+    toast('Removida','info'); renderFinTab('saidas');
+  });
 }
 
 async function renderContasPagar(el) {
@@ -3612,12 +3898,46 @@ async function carregarOFX(input) {
 
 function parseOFX(text) {
   const txs=[];
-  const stmtRx=/<STMTTRN>([\s\S]*?)<\/STMTTRN>/g;
+  // Suporta tanto formato SGML (<TAG>value) quanto XML (<TAG>value</TAG>)
+  const normText = text.replace(/\r/g,'');
+  // Tenta extrair blocos STMTTRN
+  const stmtRx=/<STMTTRN[^>]*>([\s\S]*?)<\/STMTTRN>/gi;
   let m;
-  while ((m=stmtRx.exec(text))!==null) {
+  let found = false;
+  while ((m=stmtRx.exec(normText))!==null) {
+    found = true;
     const block=m[1];
-    const get=(tag)=>{const r=new RegExp(`<${tag}>([^<]*)`,'i');const x=r.exec(block);return x?x[1].trim():'';};
-    txs.push({date:get('DTPOSTED'),value:parseFloat(get('TRNAMT').replace(',','.'))||0,memo:get('MEMO')||get('NAME')});
+    const get=(tag)=>{
+      // Suporta <TAG>value</TAG> e <TAG>value\n
+      const r1=new RegExp(`<${tag}[^>]*>([^<]+)<\/${tag}>\s*`,'i');
+      const r2=new RegExp(`<${tag}[^>]*>([^\n<]+)`,'i');
+      const x=r1.exec(block)||r2.exec(block);
+      return x?x[1].trim():'';
+    };
+    const rawDate = get('DTPOSTED')||get('DTEFECTIVE')||'';
+    // Formatos: YYYYMMDD ou YYYYMMDDHHMMSS ou YYYYMMDDHHMMSS.XXX[offset]
+    const dateClean = rawDate.substring(0,8);
+    const rawAmt = get('TRNAMT');
+    const value = parseFloat((rawAmt||'0').replace(',','.'))||0;
+    txs.push({date:dateClean, value, memo:(get('MEMO')||get('NAME')||'').substring(0,60), fitid:get('FITID')});
+  }
+  if (!found) {
+    // Fallback: formato SGML sem tags de fechamento
+    const lines = normText.split('\n');
+    let inTx = false, cur = {};
+    lines.forEach(line=>{
+      const l = line.trim();
+      if (l==='<STMTTRN>') { inTx=true; cur={}; return; }
+      if (l==='</STMTTRN>') { if(inTx&&cur.value!==undefined) txs.push(cur); inTx=false; return; }
+      if (!inTx) return;
+      const tagM = /^<([A-Z]+)>(.*)$/.exec(l);
+      if (!tagM) return;
+      const [,tag,val]=tagM;
+      if (tag==='DTPOSTED') cur.date=val.substring(0,8);
+      if (tag==='TRNAMT')   cur.value=parseFloat(val.replace(',','.'))||0;
+      if (tag==='MEMO'||tag==='NAME') if(!cur.memo) cur.memo=val.substring(0,60);
+      if (tag==='FITID')    cur.fitid=val;
+    });
   }
   return txs;
 }
@@ -3855,19 +4175,19 @@ async function abrirFormServico(id=null) {
     <div class="form-row">
       <div class="form-group"><label class="req">Nome do Serviço</label>
         <input type="text" id="sv-nome" value="${s.nome||''}" placeholder="Ex: Troca de Óleo"></div>
-      <div class="form-group"><label>Ordem de exibição</label>
+      <div class="form-group"><label class="req">Ordem de exibição</label>
         <input type="number" id="sv-ordem" value="${s.ordem||0}" min="0"></div>
     </div>
-    <div class="form-group"><label>Descrição curta</label>
+    <div class="form-group"><label class="req">Descrição curta</label>
       <input type="text" id="sv-desc" value="${s.descricao||''}" placeholder="Ex: Troca com filtro incluído, qualquer viscosidade"></div>
     <div class="form-row">
-      <div class="form-group"><label>Preço a partir de (R$)</label>
+      <div class="form-group"><label class="req">Preço a partir de (R$)</label>
         <input type="number" id="sv-de" value="${s.preco_de||''}" step="0.01" placeholder="0"></div>
       <div class="form-group"><label>Preço até (R$)</label>
         <input type="number" id="sv-ate" value="${s.preco_ate||''}" step="0.01" placeholder="Opcional"></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Tempo médio (minutos)</label>
+      <div class="form-group"><label class="req">Tempo médio (minutos)</label>
         <input type="number" id="sv-tempo" value="${s.tempo_medio_min||''}" placeholder="Ex: 40"></div>
       <div class="form-group"><label>Ativo no portal</label>
         <select id="sv-ativo">
@@ -3876,21 +4196,48 @@ async function abrirFormServico(id=null) {
         </select>
       </div>
     </div>
+    <div class="form-group">
+      <label>Foto do Serviço (aparece no App 3)</label>
+      ${s.foto_url?`<img src="${s.foto_url}" style="width:100%;max-height:140px;object-fit:cover;border-radius:.45rem;margin-bottom:.5rem;border:1px solid var(--border)">`:''}
+      <input type="file" id="sv-foto" accept="image/*"
+        style="padding:.5rem;border:1.5px dashed var(--border);border-radius:.5rem;width:100%;cursor:pointer;background:var(--bg)">
+      <div style="font-size:.72rem;color:var(--muted);margin-top:.3rem">JPG ou PNG recomendado · max 3MB</div>
+    </div>
   `,`<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
      <button class="btn btn-primary" onclick="salvarServico(${id?`'${id}'`:'null'})">Salvar</button>`);
 }
 
 async function salvarServico(id) {
-  const nome = document.getElementById('sv-nome').value.trim();
-  if (!nome) { toast('Nome é obrigatório','error'); return; }
+  const nome  = document.getElementById('sv-nome').value.trim();
+  const desc  = document.getElementById('sv-desc').value.trim();
+  const de    = parseFloat(document.getElementById('sv-de').value)||0;
+  const tempo = parseInt(document.getElementById('sv-tempo').value)||0;
+  if (!nome)  { toast('Nome é obrigatório','error'); return; }
+  if (!desc)  { toast('Descrição é obrigatória','error'); return; }
+  if (!de)    { toast('Preço a partir de é obrigatório','error'); return; }
+  if (!tempo) { toast('Tempo médio é obrigatório','error'); return; }
+
+  // Processar foto se houver
+  let fotoUrl = null;
+  const fotoInput = document.getElementById('sv-foto');
+  if (fotoInput?.files?.[0]) {
+    const file = fotoInput.files[0];
+    if (file.size > 3*1024*1024) { toast('Foto maior que 3MB','error'); return; }
+    fotoUrl = await new Promise(res => {
+      const r = new FileReader();
+      r.onload = e => res(e.target.result);
+      r.readAsDataURL(file);
+    });
+  }
+
   const dados = {
-    nome,
-    descricao:       document.getElementById('sv-desc').value.trim()||null,
-    preco_de:        parseFloat(document.getElementById('sv-de').value)||null,
+    nome, descricao: desc,
+    preco_de:        de,
     preco_ate:       parseFloat(document.getElementById('sv-ate').value)||null,
-    tempo_medio_min: parseInt(document.getElementById('sv-tempo').value)||null,
+    tempo_medio_min: tempo,
     ativo:           document.getElementById('sv-ativo').value === 'true',
     ordem:           parseInt(document.getElementById('sv-ordem').value)||0,
+    ...(fotoUrl ? {foto_url: fotoUrl} : {}),
   };
   const sb = getSB();
   let error;
@@ -3901,10 +4248,11 @@ async function salvarServico(id) {
 }
 
 async function deletarServico(id) {
-  if (!confirm('Remover este serviço da vitrine?')) return;
-  await getSB().from('servicos_publicos').delete().eq('id',id);
-  toast('Removido','info'); App.navigate('servicos_pub');
-} 
+  confirmAcao('Remover este serviço da vitrine pública? Ele deixará de aparecer no App 3.', async ()=>{
+    await getSB().from('servicos_publicos').delete().eq('id',id);
+    toast('Serviço removido','info'); App.navigate('servicos_pub');
+  });
+}
 
 async function salvarConfig() {
   const campos=[
@@ -3925,6 +4273,20 @@ async function salvarConfig() {
   document.getElementById('brand-name').textContent=nome;
   document.title=nome+' — Gestão';
   toast('Configurações salvas!');
+}
+
+
+// ── CONFIRMAÇÃO UNIVERSAL ─────────────────────────────────
+function confirmAcao(msg, onConfirm, titulo='Confirmar ação') {
+  openModal(titulo, '', `
+    <div style="text-align:center;padding:1rem 0">
+      <div style="font-size:2rem;margin-bottom:.75rem">⚠️</div>
+      <p style="font-size:.95rem;color:var(--text);line-height:1.6">${msg}</p>
+    </div>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-danger" onclick="closeModal();(${onConfirm.toString()})()">Confirmar</button>
+  `);
 }
 
 window.addEventListener('load', function() {
