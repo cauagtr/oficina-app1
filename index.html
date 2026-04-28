@@ -1709,7 +1709,24 @@ let _prevFilter='todos', _prevSearch='', _prevBTimer;
 
 async function renderPreventivo(el) {
   document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary" onclick="abrirFormPreventivo()">+ Adicionar Item</button>`;
-  const {data:lista} = await getSB().from('plano_preventivo').select('*,veiculos(placa,modelo,marca,clientes(nome,cpf))').order('proxima_revisao');
+  // Buscar preventivo com dados do veículo e cliente (incluindo telefone)
+  const {data:lista} = await getSB()
+    .from('plano_preventivo')
+    .select('*, veiculos(id, placa, modelo, marca, cliente_id, clientes(id, nome, telefone, cpf))')
+    .order('proxima_revisao');
+
+  // Enriquecer com telefone caso o join não traga (fallback via cliente_id)
+  if (lista) {
+    for (const p of lista) {
+      if (!p.veiculos?.clientes?.telefone && p.veiculos?.cliente_id) {
+        const {data:cli} = await getSB().from('clientes').select('nome,telefone').eq('id', p.veiculos.cliente_id).single();
+        if (cli) {
+          p.nome_cliente = cli.nome;
+          p.tel_cliente  = cli.telefone;
+        }
+      }
+    }
+  }
 
   const hoje = new Date();
   const statusPrev = (prox) => {
@@ -1765,9 +1782,15 @@ async function renderPreventivo(el) {
               <td><span class="badge ${st.cls}"><span class="prev-dot ${st.dot}" style="margin-right:.3rem"></span>${st.txt}</span></td>
               <td style="display:flex;gap:.3rem;flex-wrap:wrap">
                 ${(()=>{
-                  const tel=(p.veiculos?.clientes?.telefone||'').replace(/\D/g,'');
-                  const msg=`Olá ${p.veiculos?.clientes?.nome||''}! Passando para avisar que o veículo ${p.veiculos?.modelo||''} (${p.veiculos?.placa||''}) está com manutenção preventiva pendente: ${p.item_manutencao||p.servico||'revisão'}. Quando podemos agendar?`;
-                  return tel ? `<a class="btn btn-whatsapp btn-sm" href="https://wa.me/55${tel}?text=${encodeURIComponent(msg)}" target="_blank" title="Avisar cliente">WA</a>` : '';
+                  const tel=(p.veiculos?.clientes?.telefone||p.tel_cliente||'').replace(/\D/g,'');
+                  const nome = p.veiculos?.clientes?.nome||p.nome_cliente||'';
+                  const modelo = p.veiculos?.modelo||'';
+                  const placa = p.veiculos?.placa||'';
+                  const item = p.item||'revisão';
+                  const msg=`Olá ${nome}! Passando para avisar que o veículo ${modelo} (${placa}) está com manutenção preventiva pendente: ${item}. Quando podemos agendar?`;
+                  return tel
+                    ? `<a class="btn btn-whatsapp btn-sm" href="https://wa.me/55${tel}?text=${encodeURIComponent(msg)}" target="_blank">WA</a>`
+                    : `<span style="font-size:.72rem;color:var(--muted)">Sem tel.</span>`;
                 })()}
                 <button class="btn btn-secondary btn-sm" onclick="abrirFormPreventivo('${p.id}')">Editar</button>
                 <button class="btn btn-danger btn-sm" onclick="deletarPreventivo('${p.id}')">Del</button>
@@ -4304,4 +4327,3 @@ window.addEventListener('load', function() {
 </script>
 </body>
 </html>
-  
