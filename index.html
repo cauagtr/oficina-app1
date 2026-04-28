@@ -665,22 +665,22 @@ async function renderDashboard(el) {
 
   el.innerHTML = `
     <div class="kpi-grid">
-      <div class="kpi-card ${recMes>=recAnt?'green':'red'}" onclick="App.navigate('financeiro')">
+      <div class="kpi-card green" onclick="App.navigate('financeiro')">
         <div class="kpi-label">Receita do Mês</div>
         <div class="kpi-value">${brl(recMes)}</div>
         <div class="kpi-trend ${recPct>=0?'up':'down'}">${recPct>=0?'↑':'↓'} ${Math.abs(recPct)}% vs mês anterior</div>
       </div>
-      <div class="kpi-card ${(osAbertas||[]).length<=5?'green':(osAbertas||[]).length<=10?'yellow':'red'}" onclick="App.navigate('ordens')">
+      <div class="kpi-card yellow" onclick="App.navigate('ordens')">
         <div class="kpi-label">OS em Aberto</div>
         <div class="kpi-value">${(osAbertas||[]).length}</div>
         <div class="kpi-trend neutral">ordens ativas agora</div>
       </div>
-      <div class="kpi-card ${vencidas===0?'green':'red'}" onclick="App.navigate('financeiro')">
+      <div class="kpi-card red" onclick="App.navigate('financeiro')">
         <div class="kpi-label">Contas Vencidas</div>
         <div class="kpi-value">${brl(vencidas)}</div>
         <div class="kpi-trend ${vencidas===0?'up':'down'}">${(saiVenc||[]).length} parcela(s)</div>
       </div>
-      <div class="kpi-card ${pendRec===0?'green':'yellow'}" onclick="App.navigate('financeiro')">
+      <div class="kpi-card green" onclick="App.navigate('financeiro')">
         <div class="kpi-label">A Receber</div>
         <div class="kpi-value">${brl(pendRec)}</div>
         <div class="kpi-trend neutral">${(entPend||[]).length} pendente(s)</div>
@@ -697,21 +697,7 @@ async function renderDashboard(el) {
       </div>
     </div>
 
-    <div class="grid-2" style="margin-bottom:1rem">
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Receita</div>
-          <div class="chart-filter" id="dash-filter">
-            ${['sem','mes','tri','ano'].map(f=>`<button class="${_dashFilter===f?'active':''}" onclick="_dashFilter='${f}';loadDashCharts(getSB())">${{sem:'4 Sem',mes:'Mês',tri:'Trimestre',ano:'Ano'}[f]}</button>`).join('')}
-          </div>
-        </div>
-        <div class="card-body"><div class="chart-wrap"><canvas id="chart-receita"></canvas></div></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><div class="card-title">Composição da Receita</div></div>
-        <div class="card-body"><div class="chart-wrap"><canvas id="chart-donut"></canvas></div></div>
-      </div>
-    </div>
+
 
     <div class="card">
       <div class="card-header">
@@ -721,19 +707,18 @@ async function renderDashboard(el) {
       <div class="card-body" style="padding:0">
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Número</th><th>Cliente</th><th>Veículo</th><th>Status</th><th>Entrada</th><th>Total</th><th>WhatsApp</th></tr></thead>
+            <thead><tr><th>Número</th><th>Cliente</th><th>Veículo / Placa</th><th>Status</th><th>Entrada</th><th>Total</th><th>WA</th></tr></thead>
             <tbody>
               ${(os10||[]).map(o => {
                 const tel = o.clientes?.telefone?.replace(/\D/g,'');
                 const waLink = tel ? `<a class="btn btn-whatsapp btn-sm" href="https://wa.me/55${tel}?text=${encodeURIComponent(msgWhatsApp(o))}" target="_blank">WA</a>` : '—';
                 return `<tr class="${SR[o.status]||''}" onclick="abrirDetalhOS('${o.id}')">
                   <td><strong>${o.numero}</strong></td>
-                  <td>${badgePrio(o.prioridade)}</td>
                   <td>${o.clientes?.nome||'—'}</td>
-                  <td>${o.veiculos?.placa||''} ${o.veiculos?.modelo||''}</td>
+                  <td><span style="font-weight:600">${o.veiculos?.placa||'—'}</span> <span style="color:var(--muted);font-size:.8rem">${o.veiculos?.modelo||''}</span></td>
                   <td>${badgeOS(o.status)}</td>
                   <td>${brData(o.data_entrada)}</td>
-                  <td>${brl(o.valor_total)}</td>
+                  <td><strong>${brl(o.valor_total)}</strong></td>
                   <td onclick="event.stopPropagation()">${waLink}</td>
                 </tr>`;
               }).join('')}
@@ -743,7 +728,6 @@ async function renderDashboard(el) {
       </div>
     </div>
   `;
-  await loadDashCharts(getSB());
 }
 
 let _chart1, _chart2;
@@ -2510,9 +2494,10 @@ async function renderFuncionarios(el) {
             </div>
             <span class="badge b-${f.status==='ativo'?'ativo':'inativo'}">${f.status||'ativo'}</span>
           </div>
-          <div style="background:var(--bg);border-radius:.55rem;padding:.7rem .85rem;margin-bottom:.75rem;border:1px solid var(--border)">
+
+          <div style="background:var(--bg);border-radius:.55rem;padding:.65rem .85rem;margin-bottom:.75rem;border:1px solid var(--border)">
             <div style="font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.25rem">Chave Pix</div>
-            <div style="font-weight:700;font-size:.88rem;word-break:break-all;color:${f.pix?'var(--text)':'var(--muted)'}">${f.pix||'Não cadastrado'}</div>
+            <div style="font-weight:600;font-size:.88rem;word-break:break-all;color:${f.pix?'var(--text)':'var(--muted)'}">${f.pix||'Não cadastrado'}</div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.75rem">
             <div style="background:var(--bg);border-radius:.45rem;padding:.55rem .7rem">
@@ -3573,7 +3558,7 @@ async function salvarCheckJur(chave, valor) {
 async function renderFinanceiro(el) {
   el.innerHTML = `
     <div class="tabs">
-      ${[['entradas','Entradas'],['saidas','Saídas'],['pagar','A Pagar'],['receber','A Receber'],['fluxo','Fluxo de Caixa'],['margem','Margem OS'],['ofx','Conciliação'],['notas','Notas Fiscais'],['contador','Contador']].map(([k,l])=>
+      ${[['entradas','Entradas'],['saidas','Saídas'],['pagar','A Pagar'],['receber','A Receber'],['fluxo','Fluxo de Caixa'],['margem','Margem OS'],['notas','Notas Fiscais'],['relatorio_contador','Relatório Contador']].map(([k,l])=>
         `<button class="tab ${_finTab===k?'active':''}" onclick="switchFinTab('${k}')">${l}</button>`
       ).join('')}
     </div>
@@ -3585,7 +3570,7 @@ async function renderFinanceiro(el) {
 function switchFinTab(tab) {
   _finTab = tab;
   document.querySelectorAll('.tabs .tab').forEach((t,i)=>{
-    const tabKeys=['entradas','saidas','pagar','receber','fluxo','margem','ofx','notas','contador'];
+    const tabKeys=['entradas','saidas','pagar','receber','fluxo','margem','notas','relatorio_contador'];
     t.classList.toggle('active',tabKeys[i]===tab);
   });
   renderFinTab(tab);
@@ -3600,11 +3585,11 @@ async function renderFinTab(tab) {
   else if (tab==='pagar')   await renderContasPagar(el);
   else if (tab==='receber') await renderContasReceber(el);
   else if (tab==='fluxo')   await renderFluxoCaixa(el);
-  else if (tab==='ofx')          renderOFX(el);
+  
   else if (tab==='margem')       await renderMargemOS(el);
   else if (tab==='notas')        await renderNotasFiscais(el);
   else if (tab==='produtividade') await renderProdutividade(el);
-  else if (tab==='contador')     await renderRelatorioContador(el);
+  else if (tab==='relatorio_contador') await renderRelatorioContador(el);
 }
 
 async function renderFinEntradas(el) {
