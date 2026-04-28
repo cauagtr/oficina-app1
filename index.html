@@ -381,7 +381,7 @@ tbody tr { cursor: pointer; }
       <div class="nav-item" data-page="relat_contador"  onclick="App.navigate('relat_contador')"><span class="nav-icon">📁</span> Rel. Contador</div>
 
       <div class="nav-item" data-page="conformidade"    onclick="App.navigate('conformidade')"><span class="nav-icon">⚖️</span> Conformidade</div>
-      <div class="nav-item" data-page="servicos_pub"    onclick="App.navigate('servicos_pub')"><span class="nav-icon">🛎️</span> Serviços Públicos</div>
+
       <div class="nav-section">Sistema</div>
       <div class="nav-item" data-page="configuracoes"      onclick="App.navigate('configuracoes')"><span class="nav-icon">◎</span> Configurações</div>
     </nav>
@@ -1763,7 +1763,12 @@ async function renderPreventivo(el) {
               <td>${p.quilometragem_revisao?p.quilometragem_revisao.toLocaleString('pt-BR')+'km':'—'}</td>
               <td>${p.km_atual?p.km_atual.toLocaleString('pt-BR')+'km':'—'}</td>
               <td><span class="badge ${st.cls}"><span class="prev-dot ${st.dot}" style="margin-right:.3rem"></span>${st.txt}</span></td>
-              <td style="display:flex;gap:.3rem">
+              <td style="display:flex;gap:.3rem;flex-wrap:wrap">
+                ${(()=>{
+                  const tel=(p.veiculos?.clientes?.telefone||'').replace(/\D/g,'');
+                  const msg=`Olá ${p.veiculos?.clientes?.nome||''}! Passando para avisar que o veículo ${p.veiculos?.modelo||''} (${p.veiculos?.placa||''}) está com manutenção preventiva pendente: ${p.item_manutencao||p.servico||'revisão'}. Quando podemos agendar?`;
+                  return tel ? `<a class="btn btn-whatsapp btn-sm" href="https://wa.me/55${tel}?text=${encodeURIComponent(msg)}" target="_blank" title="Avisar cliente">WA</a>` : '';
+                })()}
                 <button class="btn btn-secondary btn-sm" onclick="abrirFormPreventivo('${p.id}')">Editar</button>
                 <button class="btn btn-danger btn-sm" onclick="deletarPreventivo('${p.id}')">Del</button>
               </td>
@@ -3558,7 +3563,7 @@ async function salvarCheckJur(chave, valor) {
 async function renderFinanceiro(el) {
   el.innerHTML = `
     <div class="tabs">
-      ${[['entradas','Entradas'],['saidas','Saídas'],['pagar','A Pagar'],['receber','A Receber'],['fluxo','Fluxo de Caixa'],['margem','Margem OS'],['notas','Notas Fiscais'],['relatorio_contador','Relatório Contador']].map(([k,l])=>
+      ${[['entradas','Entradas'],['saidas','Saídas'],['pagar','A Pagar'],['receber','A Receber'],['fluxo','Fluxo de Caixa'],['margem','Margem OS'],['notas','Notas Fiscais']].map(([k,l])=>
         `<button class="tab ${_finTab===k?'active':''}" onclick="switchFinTab('${k}')">${l}</button>`
       ).join('')}
     </div>
@@ -3570,7 +3575,7 @@ async function renderFinanceiro(el) {
 function switchFinTab(tab) {
   _finTab = tab;
   document.querySelectorAll('.tabs .tab').forEach((t,i)=>{
-    const tabKeys=['entradas','saidas','pagar','receber','fluxo','margem','notas','relatorio_contador'];
+    const tabKeys=['entradas','saidas','pagar','receber','fluxo','margem','notas'];
     t.classList.toggle('active',tabKeys[i]===tab);
   });
   renderFinTab(tab);
@@ -3589,7 +3594,7 @@ async function renderFinTab(tab) {
   else if (tab==='margem')       await renderMargemOS(el);
   else if (tab==='notas')        await renderNotasFiscais(el);
   else if (tab==='produtividade') await renderProdutividade(el);
-  else if (tab==='relatorio_contador') await renderRelatorioContador(el);
+
 }
 
 async function renderFinEntradas(el) {
@@ -4299,3 +4304,4 @@ window.addEventListener('load', function() {
 </script>
 </body>
 </html>
+  
