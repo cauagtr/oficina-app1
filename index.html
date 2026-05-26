@@ -1007,8 +1007,8 @@ async function abrirNovaOS() {
         <label>Prioridade</label>
         <select id="os-prioridade">
           <option value="normal">Normal</option>
-          <option value="urgente">⚡ Urgente</option>
-          <option value="vip">★ VIP</option>
+          <option value="urgente">Urgente</option>
+          <option value="vip">VIP</option>
         </select>
       </div>
     </div>
@@ -1610,6 +1610,16 @@ async function salvarCliente(id) {
   // Validar email
   const email = (document.getElementById('cf-email')?.value||'').trim();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('E-mail inválido','error'); return; }
+
+  // Verificar CPF duplicado (só no cadastro novo)
+  if (!id) {
+    const cpfFmt = cpfRaw.replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d{1,2})$/,'$1-$2');
+    const {data:exist} = await getSB().from('clientes').select('id,nome').ilike('cpf','%'+cpfFmt+'%').limit(1);
+    if (exist?.length>0) {
+      toast(`CPF já cadastrado para: ${exist[0].nome}. Edite o cliente existente.`,'error');
+      return;
+    }
+  }
 
   const dados = {
     nome:         document.getElementById('cf-nome').value.trim(),
@@ -2939,7 +2949,7 @@ async function registrarPonto(funcId) {
   const {error}=await getSB().from('ponto').insert({
     funcionario_id:funcId, data,
     entrada:data+'T'+entrada+':00', saida:saida?data+'T'+saida+':00':null,
-    horas_trabalhadas:Math.max(0,horas), horas_extra:extra, observacoes:obs
+    horas_trabalhadas:Math.max(0,horas), observacoes:obs
   });
   if (error) { toast('Erro: '+error.message,'error'); return; }
   toast('Ponto registrado!'); closeModal();
