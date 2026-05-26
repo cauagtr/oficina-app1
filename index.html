@@ -431,8 +431,8 @@ tbody tr { cursor: pointer; }
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <script>
-const SUPABASE_URL = 'https://phmtiulbrlnwjllcrjcf.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBobXRpdWxicmxud2psbGNyamNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NjgwODksImV4cCI6MjA5MDU0NDA4OX0.vsM7EZckDErY4rGLM-BTfmthW4ern9sT1TnIN6FT4ss';
+const SUPABASE_URL = 'https://vignaatgbwlhkwqeupan.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZpZ25hYXRnYndsaGt3cWV1cGFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3OTQ2MDYsImV4cCI6MjA5NTM3MDYwNn0.3J15sgQ6svDO1x1YAjUjr6M57by3nRV9hnEHNTS6HTI';
 const APP3_URL = 'https://oficina-app3.vercel.app';
 
 let _sb = null;
@@ -967,7 +967,10 @@ async function abrirDetalhOS(id) {
 // ── NOVA OS ─────────────────────────────────────────────────
 let _osBCliTimer;
 async function abrirNovaOS() {
-  const {data:prods} = await getSB().from('estoque').select('id,nome,valor_venda,quantidade').gt('quantidade',0).order('nome');
+  const [{data:prods},{data:mecs}] = await Promise.all([
+    getSB().from('estoque').select('id,nome,valor_venda,quantidade').gt('quantidade',0).order('nome'),
+    getSB().from('funcionarios').select('id,nome').eq('ativo',true).order('nome')
+  ]);
   window._osItens   = [];
   window._osEstoque = prods||[];
 
@@ -997,16 +1000,16 @@ async function abrirNovaOS() {
     </div>
     <div class="form-row">
       <div class="form-group">
+        <label class="req">Mecânico Responsável</label>
+        <select id="of-mec" required><option value="">Carregando...</option></select>
+      </div>
+      <div class="form-group">
         <label>Prioridade</label>
         <select id="os-prioridade">
           <option value="normal">Normal</option>
           <option value="urgente">⚡ Urgente</option>
           <option value="vip">★ VIP</option>
         </select>
-      </div>
-      <div class="form-group">
-        <label>Garantia (dias)</label>
-        <input type="number" id="os-garantia" value="90" min="0" placeholder="90">
       </div>
     </div>
     <div class="form-group">
@@ -1034,6 +1037,13 @@ async function abrirNovaOS() {
     </div>
   `,`<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
      <button class="btn btn-primary" onclick="salvarNovaOS()">Abrir OS</button>`, true);
+
+  // Popular mecânicos
+  const selMec = document.getElementById('of-mec');
+  if (selMec) {
+    selMec.innerHTML = '<option value="">Selecione o mecânico...</option>' +
+      (mecs||[]).map(m=>`<option value="${m.id}">${m.nome}</option>`).join('');
+  }
 }
 
 async function buscarClienteOS(q) {
@@ -1136,12 +1146,14 @@ async function salvarNovaOS() {
   const sb      = getSB();
   const cliId   = document.getElementById('os-cliente-id').value;
   const veicId  = document.getElementById('os-veiculo-id').value;
+  const mecId   = document.getElementById('of-mec')?.value||'';
   const previsao= document.getElementById('os-previsao').value;
   const km      = document.getElementById('os-km').value;
   const descr   = document.getElementById('os-descricao').value.trim();
   const desconto= parseFloat(document.getElementById('os-desconto').value)||0;
 
   if (!cliId||!veicId) { toast('Selecione cliente e veículo','error'); return; }
+  if (!mecId)           { toast('Selecione o mecânico responsável','error'); return; }
   if (!previsao)        { toast('Data de previsão é obrigatória','error'); return; }
   if (!km)              { toast('KM de entrada é obrigatório','error'); return; }
   if (!descr)           { toast('Descrição / reclamação é obrigatória','error'); return; }
@@ -1175,7 +1187,7 @@ async function salvarNovaOS() {
   const prioridade = document.getElementById('os-prioridade')?.value||'normal';
   const garantia   = parseInt(document.getElementById('os-garantia')?.value)||90;
   const {data:os, error} = await sb.from('ordens_servico').insert({
-    numero, cliente_id:cliId, veiculo_id:veicId, descricao:descr,
+    numero, cliente_id:cliId, veiculo_id:veicId, mecanico_id:mecId||null, descricao:descr,
     data_previsao:previsao||null, quilometragem_entrada:km||null,
     valor_servicos:svcs, valor_pecas:pecs, desconto, valor_total:total,
     status:'na_fila', prioridade, garantia_dias:garantia
@@ -1389,20 +1401,31 @@ async function renderClientes(el) {
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.9rem">
       ${filtrada.length===0?'<p style="color:var(--muted);padding:2rem">Nenhum cliente encontrado.</p>'
       :filtrada.map(c=>`
-        <div class="card" style="padding:1.1rem;cursor:pointer" onclick="abrirPerfilCliente('${c.id}')">
-          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:.5rem">
+        <div class="card" style="padding:1.1rem">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:.5rem;cursor:pointer" onclick="abrirPerfilCliente('${c.id}')">
             <div style="font-weight:700;font-size:.92rem">${c.nome}</div>
             <span class="badge b-${c.status}">${c.status.toUpperCase()}</span>
           </div>
-          <div style="font-size:.78rem;color:var(--muted)">${c.cpf||''}</div>
-          <div style="font-size:.78rem;color:var(--muted)">${c.telefone||''}</div>
-          <div style="display:flex;justify-content:space-between;margin-top:.7rem;font-size:.8rem;padding-top:.6rem;border-top:1px solid var(--border)">
-            <span style="font-weight:700;color:var(--green)">${brl(c.total_gasto||0)}</span>
-            <span style="color:var(--muted)">${brData(c.ultima_visita)}</span>
+          <div style="font-size:.78rem;color:var(--muted);cursor:pointer" onclick="abrirPerfilCliente('${c.id}')">${c.cpf||''}</div>
+          <div style="font-size:.78rem;color:var(--muted);cursor:pointer" onclick="abrirPerfilCliente('${c.id}')">${c.telefone||''}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:.7rem;padding-top:.6rem;border-top:1px solid var(--border)">
+            <span style="font-weight:700;font-size:.8rem;color:var(--green)">${brl(c.total_gasto||0)}</span>
+            <div style="display:flex;gap:.4rem;align-items:center">
+              <span style="font-size:.78rem;color:var(--muted)">${brData(c.ultima_visita)}</span>
+              <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deletarCliente('${c.id}','${c.nome.replace(/'/g,"\'")}')">Del</button>
+            </div>
           </div>
         </div>`).join('')}
     </div>
   `;
+}
+
+
+async function deletarCliente(id, nome) {
+  confirmAcao(`Excluir o cliente <strong>${nome}</strong>?<br><br><small style="color:var(--red)">Todos os veículos e histórico de OS vinculados também serão afetados.</small>`, async ()=>{
+    await getSB().from('clientes').delete().eq('id',id);
+    toast('Cliente removido','info'); App.navigate('clientes');
+  }, 'Excluir Cliente');
 }
 
 async function abrirPerfilCliente(id) {
@@ -1576,6 +1599,17 @@ async function salvarCliente(id) {
   const campos = ['cf-nome','cf-cpf','cf-tel','cf-email','cf-nasc','cf-end','cf-numero','cf-bairro','cf-cidade'];
   const falta  = campos.filter(c=>!document.getElementById(c)?.value?.trim());
   if (falta.length>0) { toast('Preencha todos os campos obrigatórios','error'); return; }
+
+  // Validar CPF
+  const cpfRaw = (document.getElementById('cf-cpf')?.value||'').replace(/\D/g,'');
+  if (cpfRaw.length!==11) { toast('CPF inválido — informe 11 dígitos','error'); return; }
+  const invalidos=['00000000000','11111111111','22222222222','33333333333','44444444444','55555555555','66666666666','77777777777','88888888888','99999999999'];
+  if (invalidos.includes(cpfRaw)) { toast('CPF inválido','error'); return; }
+  let s=0; for(let i=0;i<9;i++) s+=parseInt(cpfRaw[i])*(10-i); let r=11-(s%11); if(r>=10)r=0; if(r!==parseInt(cpfRaw[9])) { toast('CPF inválido','error'); return; }
+  s=0; for(let i=0;i<10;i++) s+=parseInt(cpfRaw[i])*(11-i); r=11-(s%11); if(r>=10)r=0; if(r!==parseInt(cpfRaw[10])) { toast('CPF inválido','error'); return; }
+  // Validar email
+  const email = (document.getElementById('cf-email')?.value||'').trim();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('E-mail inválido','error'); return; }
 
   const dados = {
     nome:         document.getElementById('cf-nome').value.trim(),
@@ -2260,30 +2294,153 @@ async function salvarEstoque(id) {
 }
 
 async function abrirEntradaEstoque() {
-  const {data:prods}=await getSB().from('estoque').select('id,nome,quantidade,fornecedor_id').order('nome');
-  openModal('Entrada de Estoque','Registrar recebimento',`
-    <div class="form-group"><label class="req">Produto</label>
-      <input type="text" id="ee-prod-busca" placeholder="Digite para buscar produto..." list="ee-prod-list"
-        oninput="filtrarProdutoEntrada(this.value)">
-      <datalist id="ee-prod-list">
-        ${(prods||[]).map(p=>`<option value="${p.nome} (atual: ${p.quantidade})" data-id="${p.id}">${p.nome}</option>`).join('')}
-      </datalist>
-      <input type="hidden" id="ee-prod">
+  const [{data:prods},{data:forns}] = await Promise.all([
+    getSB().from('estoque').select('id,nome,quantidade').order('nome'),
+    getSB().from('fornecedores').select('id,nome_fantasia,razao_social').order('nome_fantasia')
+  ]);
+  window._eeProds = prods||[];
+  openModal('Entrada de Estoque','Registrar recebimento de produto',`
+    <div class="form-group">
+      <label class="req">Produto</label>
+      <div style="position:relative">
+        <input type="text" id="ee-prod-busca" placeholder="Digite para buscar produto no estoque..."
+          autocomplete="off" oninput="buscarProdutoEntrada(this.value)"
+          style="padding-right:2.5rem">
+        <input type="hidden" id="ee-prod">
+        <div id="ee-prod-drop" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:99;background:#fff;border:1.5px solid var(--border);border-radius:.5rem;box-shadow:0 4px 16px rgba(0,0,0,.1);max-height:180px;overflow-y:auto"></div>
+      </div>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="req">Quantidade</label><input type="number" id="ee-qtd" value="1" min="0.01" step="0.01"></div>
       <div class="form-group"><label class="req">Valor Unit. Custo (R$)</label><input type="number" id="ee-custo" value="0" step="0.01"></div>
     </div>
-    <div class="form-group"><label class="req">Data</label><input type="date" id="ee-data" value="${isoHoje()}"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="req">Data</label><input type="date" id="ee-data" value="${isoHoje()}"></div>
+      <div class="form-group">
+        <label class="req">Forma de Pagamento</label>
+        <select id="ee-pagto">
+          <option value="">Selecione...</option>
+          <option value="dinheiro">Dinheiro</option>
+          <option value="pix">Pix</option>
+          <option value="boleto">Boleto</option>
+          <option value="cartao_debito">Cartão Débito</option>
+          <option value="cartao_credito">Cartão Crédito</option>
+          <option value="transferencia">Transferência</option>
+          <option value="prazo">A Prazo</option>
+        </select>
+      </div>
+    </div>
     <div class="form-group">
       <label class="req">Nota Fiscal (foto ou PDF)</label>
       <input type="file" id="ee-nf" accept="image/*,application/pdf"
         style="padding:.5rem;border:1.5px dashed var(--border);border-radius:.5rem;width:100%;cursor:pointer;background:var(--bg)">
       <div style="font-size:.72rem;color:var(--muted);margin-top:.3rem">JPG, PNG ou PDF · max 5MB · <strong>obrigatório</strong></div>
     </div>
-    <div class="form-group"><label>Observações</label><input type="text" id="ee-obs" placeholder="Fornecedor, número da NF..."></div>
+    <div class="form-group"><label>Observações / Nº da NF</label><input type="text" id="ee-obs" placeholder="Ex: NF 1234, fornecedor XYZ..."></div>
   `,`<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
      <button class="btn btn-primary" onclick="registrarEntradaEstoque()">Registrar Entrada</button>`);
+}
+
+function buscarProdutoEntrada(val) {
+  const drop = document.getElementById('ee-prod-drop');
+  const hidden = document.getElementById('ee-prod');
+  if (!drop) return;
+  if (!val || val.length < 2) { drop.style.display='none'; return; }
+  const prods = window._eeProds||[];
+  const filtros = prods.filter(p=>p.nome.toLowerCase().includes(val.toLowerCase())).slice(0,8);
+  if (!filtros.length) {
+    drop.style.display='block';
+    drop.innerHTML = `
+      <div style="padding:.5rem .75rem;font-size:.82rem;color:var(--muted)">Produto não encontrado</div>
+      <div style="padding:.5rem .75rem;font-size:.82rem;color:var(--blue);cursor:pointer;border-top:1px solid var(--border);font-weight:600"
+        onclick="criarProdutoRapido('${val.replace(/'/g,"\'")}')">
+        + Criar produto "${val}"
+      </div>`;
+    return;
+  }
+  drop.style.display='block';
+  drop.innerHTML = filtros.map(p=>`
+    <div style="padding:.5rem .75rem;font-size:.82rem;cursor:pointer;border-bottom:1px solid var(--border)"
+      onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"
+      onclick="selecionarProdutoEntrada('${p.id}','${p.nome.replace(/'/g,"\'")}','${p.quantidade||0}')">
+      <strong>${p.nome}</strong> <span style="color:var(--muted);float:right">${p.quantidade||0} em estoque</span>
+    </div>`).join('') +
+    `<div style="padding:.4rem .75rem;font-size:.78rem;color:var(--blue);cursor:pointer;font-weight:600;border-top:1px solid var(--border)"
+      onclick="criarProdutoRapido('')">+ Criar novo produto</div>`;
+}
+
+function selecionarProdutoEntrada(id, nome, qtd) {
+  document.getElementById('ee-prod').value = id;
+  document.getElementById('ee-prod-busca').value = nome + ' (atual: '+qtd+')';
+  document.getElementById('ee-prod-drop').style.display='none';
+}
+
+async function criarProdutoRapido(nome) {
+  const {data:forns} = await getSB().from('fornecedores').select('id,nome_fantasia,razao_social').order('nome_fantasia');
+  openModal('Novo Produto','Cadastro rápido — após salvar, volte para registrar a entrada',`
+    <div class="form-group"><label class="req">Nome do produto</label><input type="text" id="qp-nome" value="${nome}"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Código / SKU</label><input type="text" id="qp-cod" placeholder="Ex: FLT-001"></div>
+      <div class="form-group"><label class="req">Categoria</label><input type="text" id="qp-cat" placeholder="Ex: Filtros, Freios..."></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="req">Qtd mínima</label><input type="number" id="qp-min" value="1" min="0"></div>
+      <div class="form-group"><label>Valor de venda (R$)</label><input type="number" id="qp-venda" value="0" step="0.01"></div>
+    </div>
+    <div class="form-group">
+      <label>Fornecedor</label>
+      <div style="position:relative">
+        <input type="text" id="qp-forn-busca" placeholder="Digite para buscar fornecedor..."
+          autocomplete="off" oninput="buscarFornecedorRapido(this.value,(id,nome)=>{document.getElementById('qp-forn').value=id;document.getElementById('qp-forn-busca').value=nome;document.getElementById('qp-forn-drop').style.display='none';})">
+        <input type="hidden" id="qp-forn">
+        <div id="qp-forn-drop" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:99;background:#fff;border:1.5px solid var(--border);border-radius:.5rem;box-shadow:0 4px 16px rgba(0,0,0,.1);max-height:160px;overflow-y:auto"></div>
+      </div>
+      <div style="font-size:.72rem;color:var(--muted);margin-top:.2rem">Não achou? <span style="color:var(--blue);cursor:pointer;font-weight:600" onclick="abrirFormFornecedor(null)">Cadastrar novo fornecedor</span></div>
+    </div>
+    <input type="hidden" id="qp-forns-json" value='${JSON.stringify((forns||[]).map(f=>({id:f.id,nome:f.nome_fantasia||f.razao_social||''})))}'>
+  `,`<button class="btn btn-secondary" onclick="closeModal();abrirEntradaEstoque()">Cancelar</button>
+     <button class="btn btn-primary" onclick="salvarProdutoRapido()">Salvar e voltar</button>`);
+  window._qpForns = forns||[];
+}
+
+function buscarFornecedorRapido(val, onSelect) {
+  const drop = document.getElementById('qp-forn-drop');
+  if (!drop||!val||val.length<2) { if(drop) drop.style.display='none'; return; }
+  const forns = (window._qpForns||[]).filter(f=>(f.nome_fantasia||f.razao_social||'').toLowerCase().includes(val.toLowerCase())).slice(0,6);
+  drop.style.display='block';
+  drop.innerHTML = forns.map(f=>`
+    <div style="padding:.45rem .75rem;font-size:.82rem;cursor:pointer;border-bottom:1px solid var(--border)"
+      onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"
+      onclick="(${onSelect.toString()})('${f.id}','${(f.nome_fantasia||f.razao_social||'').replace(/'/g,"\'")}')">
+      ${f.nome_fantasia||f.razao_social||''}
+    </div>`).join('');
+}
+
+async function salvarProdutoRapido() {
+  const nome = document.getElementById('qp-nome')?.value?.trim();
+  const cat  = document.getElementById('qp-cat')?.value?.trim();
+  if (!nome) { toast('Nome é obrigatório','error'); return; }
+  if (!cat)  { toast('Categoria é obrigatória','error'); return; }
+  const dados = {
+    nome, codigo: document.getElementById('qp-cod')?.value?.trim()||null,
+    categoria: cat,
+    quantidade_min: parseFloat(document.getElementById('qp-min')?.value)||1,
+    valor_venda: parseFloat(document.getElementById('qp-venda')?.value)||0,
+    quantidade: 0,
+    fornecedor_id: document.getElementById('qp-forn')?.value||null,
+  };
+  const {data,error} = await getSB().from('estoque').insert(dados).select().single();
+  if (error) { toast('Erro: '+error.message,'error'); return; }
+  toast('Produto criado! Agora registre a entrada.','success');
+  // Voltar para entrada com produto já selecionado
+  closeModal();
+  await abrirEntradaEstoque();
+  setTimeout(()=>{
+    if (data?.id) {
+      window._eeProds = [...(window._eeProds||[]), data];
+      selecionarProdutoEntrada(data.id, data.nome, 0);
+    }
+  }, 300);
 }
 
 
@@ -2307,10 +2464,12 @@ async function registrarEntradaEstoque() {
   const data   = document.getElementById('ee-data').value;
   const obs    = document.getElementById('ee-obs').value;
   const nfInput= document.getElementById('ee-nf');
+  const pagto = document.getElementById('ee-pagto')?.value||'';
   if (!prodId)  { toast('Selecione o produto','error'); return; }
   if (qtd<=0)   { toast('Quantidade inválida','error'); return; }
   if (!custo)   { toast('Valor de custo é obrigatório','error'); return; }
   if (!data)    { toast('Data é obrigatória','error'); return; }
+  if (!pagto)   { toast('Forma de pagamento é obrigatória','error'); return; }
   if (!nfInput?.files?.[0]) { toast('Nota Fiscal é obrigatória','error'); return; }
 
   // Converter NF para base64 se houver arquivo
