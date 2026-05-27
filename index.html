@@ -337,12 +337,48 @@ tbody tr { cursor: pointer; }
   <div class="auth-box">
     <div class="auth-logo">Oficina <span>Pro</span></div>
     <div class="auth-sub">Painel de Gestão</div>
-    <label>E-mail</label>
-    <input type="email" id="auth-email" placeholder="gestor@oficina.com" autocomplete="email">
-    <label>Senha</label>
-    <input type="password" id="auth-pass" placeholder="••••••••" autocomplete="current-password">
-    <div id="auth-error" style="display:none;margin-top:.75rem;padding:.6rem .85rem;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);border-radius:.5rem;color:#fca5a5;font-size:.82rem;font-weight:600"></div>
-    <button class="btn-login" id="btn-login" onclick="doLogin()">Entrar</button>
+
+    <!-- PASSO 1: Email + Senha -->
+    <div id="auth-step-1">
+      <label>E-mail</label>
+      <input type="email" id="auth-email" placeholder="gestor@oficina.com" autocomplete="email">
+      <label>Senha</label>
+      <input type="password" id="auth-pass" placeholder="••••••••" autocomplete="current-password">
+      <div id="auth-error" style="display:none;margin-top:.75rem;padding:.6rem .85rem;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);border-radius:.5rem;color:#fca5a5;font-size:.82rem;font-weight:600"></div>
+      <button class="btn-login" id="btn-login" onclick="doLogin()">Entrar</button>
+    </div>
+
+    <!-- PASSO 2: Código MFA (aparece só se MFA ativado) -->
+    <div id="auth-step-2" style="display:none">
+      <div style="text-align:center;margin-bottom:1rem">
+        <div style="font-size:1.5rem;margin-bottom:.5rem">🔐</div>
+        <div style="font-size:.88rem;color:rgba(255,255,255,.6);line-height:1.5">Digite o código de 6 dígitos<br>do seu aplicativo autenticador</div>
+      </div>
+      <label>Código de verificação</label>
+      <input type="text" id="auth-totp" placeholder="000000" maxlength="6"
+        inputmode="numeric" autocomplete="one-time-code"
+        style="text-align:center;font-size:1.4rem;letter-spacing:.3em;font-family:var(--mono)"
+        oninput="this.value=this.value.replace(/\D/g,''); if(this.value.length===6) verificarMFA()">
+      <div id="auth-mfa-error" style="display:none;margin-top:.75rem;padding:.6rem .85rem;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);border-radius:.5rem;color:#fca5a5;font-size:.82rem;font-weight:600"></div>
+      <button class="btn-login" onclick="verificarMFA()">Verificar</button>
+      <button onclick="voltarLogin()" style="width:100%;margin-top:.5rem;background:none;border:none;color:rgba(255,255,255,.35);font-size:.8rem;cursor:pointer;font-family:inherit">← Voltar</button>
+    </div>
+
+    <!-- PASSO 3: Configurar MFA (primeiro acesso) -->
+    <div id="auth-step-3" style="display:none">
+      <div style="text-align:center;margin-bottom:1rem">
+        <div style="font-size:1.5rem;margin-bottom:.5rem">🛡️</div>
+        <div style="font-weight:700;margin-bottom:.4rem">Ativar autenticação em 2 fatores</div>
+        <div style="font-size:.82rem;color:rgba(255,255,255,.5);line-height:1.5">Escaneie o QR Code com Google Authenticator ou Authy</div>
+      </div>
+      <div id="mfa-qr" style="display:flex;justify-content:center;margin:1rem 0;background:#fff;border-radius:.5rem;padding:.75rem"></div>
+      <div style="font-size:.72rem;color:rgba(255,255,255,.35);text-align:center;margin-bottom:.75rem;word-break:break-all" id="mfa-secret-txt"></div>
+      <label>Confirme com o código do app</label>
+      <input type="text" id="auth-totp-setup" placeholder="000000" maxlength="6"
+        inputmode="numeric" style="text-align:center;font-size:1.2rem;letter-spacing:.2em">
+      <div id="auth-setup-error" style="display:none;margin-top:.5rem;padding:.5rem .75rem;background:rgba(239,68,68,.15);border-radius:.5rem;color:#fca5a5;font-size:.8rem"></div>
+      <button class="btn-login" onclick="confirmarSetupMFA()">Ativar MFA</button>
+    </div>
   </div>
 </div>
 
@@ -495,38 +531,234 @@ function closeSidebar() {
 }
 
 // ── AUTH ────────────────────────────────────────────────────
+// ── MFA — Autenticação em 2 Fatores ─────────────────────────
+let _mfaChallengeId = null;
+
+function voltarLogin(){
+  document.getElementById('auth-step-2').style.display = 'none';
+  document.getElementById('auth-step-3').style.display = 'none';
+  document.getElementById('auth-step-1').style.display = 'block';
+  _mfaChallengeId = null;
+}
+
+async function desativarMFA(factorId) {
+  confirmAcao('Desativar a autenticação em 2 fatores? Sua conta ficará menos protegida.', async () => {
+    const {error} = await getSB().auth.mfa.unenroll({ factorId });
+    if (error) { toast('Erro ao desativar: '+error.message,'error'); return; }
+    toast('MFA desativado.');
+    auditLog('MFA_DESATIVADO', {});
+    App.navigate('configuracoes');
+  }, 'Desativar MFA');
+}
+
+async function verificarMFA(){
+  const code  = (document.getElementById('auth-totp')?.value||'').trim();
+  const errEl = document.getElementById('auth-mfa-error');
+  if(code.length!==6){ errEl.textContent='Digite 6 dígitos.'; errEl.style.display='block'; return; }
+
+  const {error} = await getSB().auth.mfa.challengeAndVerify({
+    factorId: _mfaChallengeId, code
+  });
+  if(error){
+    errEl.textContent='Código incorreto. Tente novamente.';
+    errEl.style.display='block';
+    document.getElementById('auth-totp').value='';
+    auditLog('MFA_FALHOU',{});
+    return;
+  }
+  errEl.style.display='none';
+  auditLog('MFA_OK',{});
+  resetActivityTimer();
+}
+
+async function iniciarSetupMFA(){
+  const {data,error} = await getSB().auth.mfa.enroll({factorType:'totp',issuer:'OficinaPro'});
+  if(error){ toast('Erro ao gerar QR: '+error.message,'e'); return; }
+  const qrEl = document.getElementById('mfa-qr');
+  qrEl.innerHTML = `<img src="${data.totp.qr_code}" style="width:160px;height:160px;border-radius:.35rem">`;
+  document.getElementById('mfa-secret-txt').textContent = 'Chave manual: '+data.totp.secret;
+  document.getElementById('auth-step-1').style.display='none';
+  document.getElementById('auth-step-3').style.display='block';
+  window._mfaFactorId = data.id;
+}
+
+async function confirmarSetupMFA(){
+  const code  = (document.getElementById('auth-totp-setup')?.value||'').trim();
+  const errEl = document.getElementById('auth-setup-error');
+  if(code.length!==6){ errEl.textContent='Digite o código de 6 dígitos do app.'; errEl.style.display='block'; return; }
+  const {error} = await getSB().auth.mfa.challengeAndVerify({factorId:window._mfaFactorId,code});
+  if(error){ errEl.textContent='Código inválido. Tente novamente.'; errEl.style.display='block'; return; }
+  toast('MFA ativado com sucesso! 🔐');
+  document.getElementById('auth-step-3').style.display='none';
+  auditLog('MFA_ATIVADO',{});
+}
+
+// ══════════════════════════════════════════════════════════
+// SEGURANÇA — Rate limiting, timeout de sessão, logs
+// ══════════════════════════════════════════════════════════
+
+// Rate limiting de login
+const _loginAttempts = { count: 0, lastAttempt: 0, blockedUntil: 0 };
+const MAX_ATTEMPTS = 5;
+const BLOCK_TIME   = 15 * 60 * 1000; // 15 minutos
+const ATTEMPT_WIN  = 10 * 60 * 1000; // janela de 10 minutos
+
+// Timeout de sessão por inatividade
+const SESSION_TIMEOUT = 60 * 60 * 1000; // 60 minutos
+let _lastActivity = Date.now();
+let _timeoutTimer = null;
+
+function resetActivityTimer() {
+  _lastActivity = Date.now();
+  clearTimeout(_timeoutTimer);
+  _timeoutTimer = setTimeout(() => {
+    const inativo = Date.now() - _lastActivity;
+    if (inativo >= SESSION_TIMEOUT) {
+      toast('Sessão encerrada por inatividade.', 'info');
+      setTimeout(() => doLogout(), 1500);
+    }
+  }, SESSION_TIMEOUT);
+}
+
+// Monitorar atividade
+['click','keydown','mousemove','touchstart','scroll'].forEach(ev => {
+  document.addEventListener(ev, resetActivityTimer, { passive: true });
+});
+
+// Sanitizar input — remover scripts e HTML perigosos
+function sanitize(str) {
+  if (typeof str !== 'string') return str;
+  return str
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/javascript:/gi, '')
+    .replace(/on\w+\s*=/gi, '')
+    .trim();
+}
+
+// Log de auditoria — registra ações importantes
+async function auditLog(acao, detalhes) {
+  try {
+    const session = await getSB().auth.getSession();
+    const user = session?.data?.session?.user?.email || 'anon';
+    console.info(`[AUDIT] ${new Date().toISOString()} | ${user} | ${acao} | ${JSON.stringify(detalhes)}`);
+    // Salvar no Supabase se tabela existir
+    await getSB().from('audit_log').insert({
+      usuario: user, acao, detalhes: JSON.stringify(detalhes),
+      ip: 'client', created_at: new Date().toISOString()
+    }).then(() => {}).catch(() => {}); // silencioso se tabela não existir
+  } catch(e) {}
+}
+
 async function doLogin() {
   const email = document.getElementById('auth-email').value.trim();
   const pass  = document.getElementById('auth-pass').value;
   if (!email || !pass) { showAuthError('Preencha e-mail e senha'); return; }
+
+  // Verificar bloqueio por tentativas
+  const agora = Date.now();
+  if (_loginAttempts.blockedUntil > agora) {
+    const restMin = Math.ceil((_loginAttempts.blockedUntil - agora) / 60000);
+    showAuthError(`Muitas tentativas. Tente novamente em ${restMin} min.`);
+    return;
+  }
+
+  // Resetar contador se janela expirou
+  if (agora - _loginAttempts.lastAttempt > ATTEMPT_WIN) {
+    _loginAttempts.count = 0;
+  }
+
   const btn = document.querySelector('.btn-login');
   btn.textContent = 'Entrando...'; btn.disabled = true;
+
   try {
     const {data, error} = await getSB().auth.signInWithPassword({email, password: pass});
-    if (error) { showAuthError('E-mail ou senha incorretos'); }
-  } catch(e) { showAuthError('Erro de conexão. Tente novamente.'); }
+    if (error) {
+      _loginAttempts.count++;
+      _loginAttempts.lastAttempt = agora;
+      if (_loginAttempts.count >= MAX_ATTEMPTS) {
+        _loginAttempts.blockedUntil = agora + BLOCK_TIME;
+        showAuthError(`Conta bloqueada por 15 minutos após ${MAX_ATTEMPTS} tentativas incorretas.`);
+        auditLog('LOGIN_BLOQUEADO', { email, tentativas: _loginAttempts.count });
+      } else {
+        const restantes = MAX_ATTEMPTS - _loginAttempts.count;
+        showAuthError(`E-mail ou senha incorretos. ${restantes} tentativa(s) restante(s).`);
+      }
+    } else {
+      _loginAttempts.count = 0;
+      _loginAttempts.blockedUntil = 0;
+
+      // Verificar se usuário tem MFA ativo
+      const {data: assurance} = await getSB().auth.mfa.getAuthenticatorAssuranceLevel();
+      if (assurance?.nextLevel === 'aal2' && assurance?.currentLevel !== 'aal2') {
+        // MFA obrigatório — listar factors e pedir código
+        const {data: factors} = await getSB().auth.mfa.listFactors();
+        const totp = factors?.totp?.[0];
+        if (totp) {
+          const {data: challenge} = await getSB().auth.mfa.challenge({ factorId: totp.id });
+          _mfaChallengeId = totp.id;
+          document.getElementById('auth-step-1').style.display = 'none';
+          document.getElementById('auth-step-2').style.display = 'block';
+          document.getElementById('auth-totp')?.focus();
+          btn.textContent = 'Entrar'; btn.disabled = false;
+          return;
+        }
+      }
+      auditLog('LOGIN_OK', { email });
+      resetActivityTimer();
+    }
+  } catch(e) {
+    showAuthError('Erro de conexão. Tente novamente.');
+  }
   btn.textContent = 'Entrar'; btn.disabled = false;
 }
 
 function showAuthError(msg) {
   const el = document.getElementById('auth-error');
-  if (el) { el.textContent = msg; el.style.display = 'block'; setTimeout(()=>el.style.display='none', 4000); }
+  if (el) { el.textContent = msg; el.style.display = 'block'; setTimeout(()=>el.style.display='none', 6000); }
 }
 
 async function doLogout() {
+  auditLog('LOGOUT', {});
+  clearTimeout(_timeoutTimer);
   await getSB().auth.signOut();
 }
 
 function initAuth() {
-  getSB().auth.onAuthStateChange((event, session) => {
+  getSB().auth.onAuthStateChange(async (event, session) => {
     if (session) {
+      // Verificar se o usuário tem perfil de gestor
+      const {data: func} = await getSB()
+        .from('funcionarios')
+        .select('id, nome, cargo, perfil')
+        .eq('email', session.user.email)
+        .maybeSingle();
+
+      if (!func) {
+        // Usuário Auth existe mas não tem funcionário vinculado
+        await getSB().auth.signOut();
+        showAuthError('Usuário não encontrado no sistema. Contate o administrador.');
+        return;
+      }
+
+      if (func.perfil !== 'gestor') {
+        // Perfil não autorizado para o App 1
+        await getSB().auth.signOut();
+        showAuthError('Acesso negado. Este app é exclusivo para gestores.');
+        return;
+      }
+
       document.getElementById('auth-screen').classList.add('hidden');
       document.getElementById('app').classList.remove('hidden');
-      document.getElementById('sidebar-user').textContent = session.user.email;
+      document.getElementById('sidebar-user').textContent = func.nome || session.user.email;
+      auditLog('LOGIN_OK', { email: session.user.email, perfil: func.perfil });
+      resetActivityTimer();
+      window._gestorId = func.id;
       App.init();
     } else {
       document.getElementById('auth-screen').classList.remove('hidden');
       document.getElementById('app').classList.add('hidden');
+      clearTimeout(_timeoutTimer);
     }
   });
 }
@@ -4281,6 +4513,15 @@ async function renderConfiguracoes(el) {
       </div>
       <div>
         <div class="card" style="margin-bottom:.9rem">
+          <div class="card-header"><div class="card-title">🔐 Segurança da Conta</div></div>
+          <div class="card-body" id="cfg-mfa-status">
+            <div style="font-size:.82rem;color:var(--muted);margin-bottom:.75rem">Autenticação em 2 fatores (MFA) protege sua conta mesmo se a senha for comprometida.</div>
+            <div id="mfa-status-wrap">
+              <div class="loading-wrap" style="padding:.5rem"><div class="spinner"></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:.9rem">
           <div class="card-header"><div class="card-title">Links dos Apps</div></div>
           <div class="card-body">
             <div style="font-size:.82rem;margin-bottom:.6rem">
@@ -4302,6 +4543,31 @@ async function renderConfiguracoes(el) {
       </div>
     </div>
   `;
+
+  // Carregar status MFA
+  getSB().auth.mfa.listFactors().then(({data:factors}) => {
+    const wrap = document.getElementById('mfa-status-wrap');
+    if (!wrap) return;
+    const totps = factors?.totp||[];
+    const ativo = totps.some(f => f.status === 'verified');
+    wrap.innerHTML = ativo
+      ? `<div style="display:flex;align-items:center;gap:.6rem;padding:.5rem 0">
+           <span style="color:var(--green);font-size:1.1rem">✓</span>
+           <div>
+             <div style="font-weight:700;font-size:.85rem;color:var(--green)">MFA ativo</div>
+             <div style="font-size:.75rem;color:var(--muted)">Sua conta está protegida com autenticação em 2 fatores</div>
+           </div>
+         </div>
+         <button class="btn btn-secondary" style="font-size:.78rem;margin-top:.5rem" onclick="desativarMFA('${totps[0]?.id}')">Desativar MFA</button>`
+      : `<div style="display:flex;align-items:center;gap:.6rem;padding:.5rem 0">
+           <span style="color:var(--red);font-size:1.1rem">✕</span>
+           <div>
+             <div style="font-weight:700;font-size:.85rem;color:var(--red)">MFA desativado</div>
+             <div style="font-size:.75rem;color:var(--muted)">Recomendamos ativar para maior segurança</div>
+           </div>
+         </div>
+         <button class="btn btn-primary" style="font-size:.82rem;margin-top:.5rem" onclick="iniciarSetupMFA()">🔐 Ativar MFA agora</button>`;
+  });
 
   // Carregar métricas
   const sb=getSB();
