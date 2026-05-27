@@ -473,7 +473,15 @@ const APP3_URL = 'https://oficina-app3.vercel.app';
 
 let _sb = null;
 function getSB() {
-  if (!_sb) _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  if (!_sb) _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    auth: {
+      persistSession: true,
+      storageKey: 'oficina-pro-auth',
+      storage: window.localStorage,
+      autoRefreshToken: true,
+      detectSessionInUrl: false
+    }
+  });
   return _sb;
 }
 
