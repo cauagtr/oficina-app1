@@ -735,34 +735,40 @@ async function doLogout() {
 function initAuth() {
   getSB().auth.onAuthStateChange(async (event, session) => {
     if (session) {
-      // Verificar se o usuário tem perfil de gestor
-      const {data: func} = await getSB()
-        .from('funcionarios')
-        .select('id, nome, cargo, perfil')
-        .eq('email', session.user.email)
-        .maybeSingle();
+      // Aguardar um tick para o token estar ativo
+      if (event === 'SIGNED_OUT') return;
 
-      if (!func) {
-        // Usuário Auth existe mas não tem funcionário vinculado
-        await getSB().auth.signOut();
-        showAuthError('Usuário não encontrado no sistema. Contate o administrador.');
-        return;
+      try {
+        const {data: func, error} = await getSB()
+          .from('funcionarios')
+          .select('id, nome, cargo, perfil')
+          .eq('email', session.user.email)
+          .maybeSingle();
+
+        if (error || !func) {
+          await getSB().auth.signOut();
+          showAuthError('Usuário não encontrado no sistema. Contate o administrador.');
+          return;
+        }
+
+        if (func.perfil !== 'gestor') {
+          await getSB().auth.signOut();
+          showAuthError('Acesso negado. Este app é exclusivo para gestores.');
+          return;
+        }
+
+        document.getElementById('auth-screen').classList.add('hidden');
+        document.getElementById('app').classList.remove('hidden');
+        document.getElementById('sidebar-user').textContent = func.nome || session.user.email;
+        auditLog('LOGIN_OK', { email: session.user.email, perfil: func.perfil });
+        resetActivityTimer();
+        window._gestorId = func.id;
+        App.init();
+
+      } catch(e) {
+        showAuthError('Erro ao verificar acesso. Tente novamente.');
       }
 
-      if (func.perfil !== 'gestor') {
-        // Perfil não autorizado para o App 1
-        await getSB().auth.signOut();
-        showAuthError('Acesso negado. Este app é exclusivo para gestores.');
-        return;
-      }
-
-      document.getElementById('auth-screen').classList.add('hidden');
-      document.getElementById('app').classList.remove('hidden');
-      document.getElementById('sidebar-user').textContent = func.nome || session.user.email;
-      auditLog('LOGIN_OK', { email: session.user.email, perfil: func.perfil });
-      resetActivityTimer();
-      window._gestorId = func.id;
-      App.init();
     } else {
       document.getElementById('auth-screen').classList.remove('hidden');
       document.getElementById('app').classList.add('hidden');
